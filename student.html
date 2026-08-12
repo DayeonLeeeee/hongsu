@@ -417,6 +417,8 @@ async function startGrading() {
         problem_image_b64: state.photoB64,
         solution_image_b64: state.photoB64,
         problem_text: state.current?.statement || '',
+        problem_id: state.current?.id || '',
+        unit: state.current?.unit || '',
         solution_steps: state.ocrSteps,
         correct_answer: state.current?.correct_answer || '',
         grading_rules: state.current?.grading_rules || state.current?.required_reasoning || '',
