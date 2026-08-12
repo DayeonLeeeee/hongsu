@@ -1399,5 +1399,5 @@ if __name__ == "__main__":
     print("    GET  /health               - 헬스체크")
     print("=" * 60)
 
-    port = int(_os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
