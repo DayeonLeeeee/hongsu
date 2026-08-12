@@ -1569,10 +1569,7 @@ def load_initial_problems():
 
 # ─── 초기 문제 로드 (모듈 로드 시 실행, gunicorn 호환) ───
 load_initial_problems()
-try:
-    load_problems_from_supabase()
-except Exception as e:
-    print(f"  [Supabase] 문제 로드 스킵: {e}")
+load_problems_from_supabase()  # DB에 있는 문제도 병합
 
 
 # ─── 서버 시작 (로컬 실행용) ──────────────────────────
