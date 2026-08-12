@@ -2,10 +2,10 @@
 nixPkgs = ["python312"]
 
 [phases.install]
-cmds = ["pip install -r requirements.txt"]
+cmds = ["pip install --no-cache-dir flask anthropic google-generativeai requests gunicorn supabase"]
 
 [start]
-cmd = "gunicorn hongsu_server:app --bind 0.0.0.0:$PORT"
+cmd = "gunicorn hongsu_server:app --bind 0.0.0.0:$PORT --workers 1 --threads 2 --timeout 120 --preload"
 
 
 [phases.install]
