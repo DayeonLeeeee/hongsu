@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>홍수 관리자</title>
+<style>
+  :root { --pri: #5B5FEF; --bg: #F6F6FC; --card: #fff; --border: #E9E9F5; --text: #20212E; --sub: #767893; --ok: #17A673; --err: #E6493C; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif; background: var(--bg); color: var(--text); }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 20px; }
+  h1 { font-size: 22px; font-weight: 800; margin-bottom: 4px; }
+  .sub { font-size: 13px; color: var(--sub); margin-bottom: 20px; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 20px; }
+  .tab { padding: 8px 16px; border-radius: 100px; border: 1px solid var(--border); background: var(--card); cursor: pointer; font-size: 13px; font-weight: 600; color: var(--sub); }
+  .tab.active { background: var(--pri); color: #fff; border-color: var(--pri); }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 16px; margin-bottom: 12px; }
+  .card-title { font-size: 15px; font-weight: 700; margin-bottom: 8px; }
+  .chip { display: inline-block; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 8px; margin-right: 4px; }
+  .chip-unit { background: #5B5FEF1a; color: #5B5FEF; }
+  .chip-diff { background: var(--bg); color: var(--sub); }
+  .chip-h { background: #E6493C1a; color: #E6493C; }
+  .btn { padding: 10px 18px; border: none; border-radius: 12px; font-size: 14px; font-weight: 700; cursor: pointer; }
+  .btn-pri { background: var(--pri); color: #fff; }
+  .btn-sec { background: var(--card); border: 1px solid var(--border); color: var(--text); }
+  .btn-sm { padding: 6px 12px; font-size: 12px; border-radius: 8px; }
+  .btn-del { background: #FDEBEA; color: var(--err); }
+  textarea, input, select { font-family: inherit; font-size: 14px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; width: 100%; margin-bottom: 8px; }
+  textarea { min-height: 80px; resize: vertical; }
+  label { font-size: 12px; font-weight: 700; color: var(--sub); display: block; margin-bottom: 4px; }
+  .row { display: flex; gap: 10px; }
+  .row > * { flex: 1; }
+  .stat-row { display: flex; gap: 10px; margin-bottom: 16px; }
+  .stat-box { flex: 1; background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 14px; text-align: center; }
+  .stat-num { font-size: 28px; font-weight: 800; }
+  .stat-label { font-size: 11px; color: var(--sub); margin-top: 2px; }
+  .bar { height: 20px; border-radius: 4px; margin-bottom: 4px; display: flex; align-items: center; padding: 0 8px; font-size: 11px; font-weight: 700; color: #fff; }
+  .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; z-index: 100; }
+  .modal { background: var(--card); border-radius: 18px; padding: 24px; width: 90%; max-width: 600px; max-height: 85vh; overflow-y: auto; }
+  .modal h2 { font-size: 18px; font-weight: 800; margin-bottom: 16px; }
+  .hidden { display: none; }
+  .problem-stmt { font-size: 13px; color: var(--sub); margin-top: 6px; white-space: pre-line; max-height: 60px; overflow: hidden; }
+  .result-correct { color: var(--ok); font-weight: 800; }
+  .result-wrong { color: var(--err); font-weight: 800; }
+  .tag-row { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🧮 홍수 관리자</h1>
+  <div class="sub">문제 관리 · 채점 가이드 · 학생 결과 조회</div>
+
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('problems')">📋 문제 관리</div>
+    <div class="tab" onclick="switchTab('results')">📊 결과 조회</div>
+    <div class="tab" onclick="switchTab('stats')">📈 통계</div>
+  </div>
+
+  <!-- 문제 관리 -->
+  <div id="tab-problems">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <div>
+        <select id="unitFilter" onchange="loadProblems()" style="width:auto;display:inline-block;">
+          <option value="">전체 단원</option>
+          <option value="함수">함수</option>
+          <option value="역함수">역함수</option>
+          <option value="합성함수">합성함수</option>
+          <option value="유리함수">유리함수</option>
+          <option value="무리함수">무리함수</option>
+        </select>
+      </div>
+      <button class="btn btn-pri" onclick="openAddModal()">+ 문제 추가</button>
+    </div>
+    <div id="problemList"></div>
+  </div>
+
+  <!-- 결과 조회 -->
+  <div id="tab-results" class="hidden">
+    <div style="margin-bottom:14px;">
+      <input id="resultFilter" placeholder="문제 ID 또는 학생 ID로 검색..." oninput="loadResults()">
+    </div>
+    <div id="resultList"></div>
+  </div>
+
+  <!-- 통계 -->
+  <div id="tab-stats" class="hidden">
+    <div id="statsContent"></div>
+  </div>
+</div>
+
+<!-- 문제 추가/수정 모달 -->
+<div id="modal" class="modal-bg hidden" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <h2 id="modalTitle">문제 추가</h2>
+    <input type="hidden" id="editId">
+
+    <div class="row">
+      <div><label>단원</label>
+        <select id="fUnit"><option>함수</option><option>역함수</option><option>합성함수</option><option>유리함수</option><option>무리함수</option></select>
+      </div>
+      <div><label>유형</label>
+        <select id="fType"><option>서술형</option><option>객관식</option></select>
+      </div>
+      <div><label>난이도</label>
+        <select id="fDiff"><option>하</option><option>중</option><option>중상</option><option>상</option></select>
+      </div>
+    </div>
+
+    <label>문제 제목</label>
+    <input id="fTitle" placeholder="예: 대응 관계가 함수인지 판정하기">
+
+    <label>문제 지문</label>
+    <textarea id="fStatement" rows="4" placeholder="문제 내용을 입력하세요..."></textarea>
+
+    <label>보기 (객관식, 쉼표로 구분)</label>
+    <input id="fChoices" placeholder="①, ②, ③, ④">
+
+    <label>정답</label>
+    <input id="fAnswer" placeholder="예: A는 함수, B는 함수가 아님">
+
+    <hr style="margin:16px 0;border:none;border-top:1px solid var(--border);">
+    <h2 style="font-size:16px;">📝 채점 가이드</h2>
+
+    <label>필수 풀이 근거</label>
+    <textarea id="fReasoning" rows="2" placeholder="학생이 반드시 보여야 할 근거..."></textarea>
+
+    <label>채점 규칙</label>
+    <textarea id="fRules" rows="3" placeholder="채점 시 적용할 규칙..."></textarea>
+
+    <label>모범답안</label>
+    <textarea id="fModelAnswer" rows="4" placeholder="정석 풀이 전문..."></textarea>
+
+    <label>예상 오류 H코드 (쉼표 구분)</label>
+    <input id="fErrors" placeholder="H1, H10">
+
+    <label>피드백 예시</label>
+    <textarea id="fFeedback" rows="2" placeholder="학생에게 줄 피드백 예시..."></textarea>
+
+    <label>개념 태그 (쉼표 구분)</label>
+    <input id="fTags" placeholder="함수, 대응">
+
+    <div style="display:flex;gap:10px;margin-top:16px;justify-content:flex-end;">
+      <button class="btn btn-sec" onclick="closeModal()">취소</button>
+      <button class="btn btn-pri" onclick="saveProblem()">저장</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '';  // 같은 서버에서 서빙하므로 빈 문자열
+
+// ─── 탭 전환 ───
+function switchTab(t) {
+  document.querySelectorAll('.tabs .tab').forEach((el, i) => {
+    el.classList.toggle('active', ['problems','results','stats'][i] === t);
+  });
+  ['problems','results','stats'].forEach(id => {
+    document.getElementById('tab-' + id).classList.toggle('hidden', id !== t);
+  });
+  if (t === 'problems') loadProblems();
+  if (t === 'results') loadResults();
+  if (t === 'stats') loadStats();
+}
+
+// ─── 문제 관리 ───
+async function loadProblems() {
+  const unit = document.getElementById('unitFilter').value;
+  const params = unit ? '?unit=' + encodeURIComponent(unit) : '';
+  const resp = await fetch(API + '/admin/problems' + params);
+  const data = await resp.json();
+  const list = data.problems || [];
+
+  document.getElementById('problemList').innerHTML = list.map(p => `
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+        <div>
+          <div class="tag-row">
+            <span class="chip chip-unit">${p.unit || ''}</span>
+            <span class="chip chip-diff">${p.type || ''} · 난이도 ${p.difficulty || ''}</span>
+            <span style="font-size:11px;color:var(--sub);">${p.id}</span>
+          </div>
+          <div class="card-title" style="margin-top:8px;">${p.title || ''}</div>
+          <div class="problem-stmt">${(p.statement || '').substring(0, 120)}${(p.statement||'').length > 120 ? '...' : ''}</div>
+          ${p.expected_errors && p.expected_errors.length ? '<div class="tag-row" style="margin-top:6px;">' + p.expected_errors.map(h => '<span class="chip chip-h">' + h + '</span>').join('') + '</div>' : ''}
+        </div>
+        <div style="display:flex;gap:6px;flex-shrink:0;">
+          <button class="btn btn-sec btn-sm" onclick="openEditModal('${p.id}')">수정</button>
+          <button class="btn btn-del btn-sm" onclick="deleteProblem('${p.id}')">삭제</button>
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function openAddModal() {
+  document.getElementById('modalTitle').textContent = '문제 추가';
+  document.getElementById('editId').value = '';
+  ['fUnit','fType','fDiff','fTitle','fStatement','fChoices','fAnswer','fReasoning','fRules','fModelAnswer','fErrors','fFeedback','fTags'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el.tagName === 'SELECT') el.selectedIndex = 0;
+    else el.value = '';
+  });
+  document.getElementById('modal').classList.remove('hidden');
+}
+
+async function openEditModal(pid) {
+  const resp = await fetch(API + '/admin/problems/' + pid);
+  const data = await resp.json();
+  if (!data.success) return alert('문제를 불러올 수 없습니다');
+  const p = data.problem;
+
+  document.getElementById('modalTitle').textContent = '문제 수정: ' + pid;
+  document.getElementById('editId').value = pid;
+  document.getElementById('fUnit').value = p.unit || '함수';
+  document.getElementById('fType').value = p.type || '서술형';
+  document.getElementById('fDiff').value = p.difficulty || '중';
+  document.getElementById('fTitle').value = p.title || '';
+  document.getElementById('fStatement').value = p.statement || '';
+  document.getElementById('fChoices').value = (p.choices || []).join(', ');
+  document.getElementById('fAnswer').value = p.correct_answer || '';
+  document.getElementById('fReasoning').value = p.required_reasoning || '';
+  document.getElementById('fRules').value = p.grading_rules || '';
+  document.getElementById('fModelAnswer').value = p.model_answer || '';
+  document.getElementById('fErrors').value = (p.expected_errors || []).join(', ');
+  document.getElementById('fFeedback').value = p.feedback_example || '';
+  document.getElementById('fTags').value = (p.concept_tags || []).join(', ');
+  document.getElementById('modal').classList.remove('hidden');
+}
+
+function closeModal() { document.getElementById('modal').classList.add('hidden'); }
+
+async function saveProblem() {
+  const editId = document.getElementById('editId').value;
+  const choices = document.getElementById('fChoices').value.split(',').map(s => s.trim()).filter(Boolean);
+
+  const body = {
+    unit: document.getElementById('fUnit').value,
+    type: document.getElementById('fType').value,
+    difficulty: document.getElementById('fDiff').value,
+    title: document.getElementById('fTitle').value,
+    statement: document.getElementById('fStatement').value,
+    choices: choices.length ? choices : null,
+    correct_answer: document.getElementById('fAnswer').value,
+    required_reasoning: document.getElementById('fReasoning').value,
+    grading_rules: document.getElementById('fRules').value,
+    model_answer: document.getElementById('fModelAnswer').value,
+    expected_errors: document.getElementById('fErrors').value.split(',').map(s => s.trim()).filter(Boolean),
+    feedback_example: document.getElementById('fFeedback').value,
+    concept_tags: document.getElementById('fTags').value.split(',').map(s => s.trim()).filter(Boolean),
+  };
+
+  const url = editId ? API + '/admin/problems/' + editId : API + '/admin/problems';
+  const method = editId ? 'PUT' : 'POST';
+
+  const resp = await fetch(url, {
+    method, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
+  });
+  const data = await resp.json();
+  if (data.success) {
+    closeModal();
+    loadProblems();
+  } else {
+    alert('저장 실패: ' + (data.error || ''));
+  }
+}
+
+async function deleteProblem(pid) {
+  if (!confirm(pid + ' 문제를 삭제하시겠습니까?')) return;
+  await fetch(API + '/admin/problems/' + pid, { method: 'DELETE' });
+  loadProblems();
+}
+
+// ─── 결과 조회 ───
+async function loadResults() {
+  const filter = (document.getElementById('resultFilter')?.value || '').trim();
+  let url = API + '/results';
+  if (filter) {
+    if (filter.startsWith('Q') || filter.startsWith('P')) url += '?problem_id=' + filter;
+    else url += '?student_id=' + filter;
+  }
+  const resp = await fetch(url);
+  const data = await resp.json();
+  const results = data.results || [];
+
+  if (!results.length) {
+    document.getElementById('resultList').innerHTML = '<div class="card" style="text-align:center;color:var(--sub);">아직 채점 결과가 없습니다</div>';
+    return;
+  }
+
+  document.getElementById('resultList').innerHTML = results.map(r => `
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;">
+        <div>
+          <span class="chip chip-unit">${r.problem_id || '?'}</span>
+          <span class="${r.is_correct ? 'result-correct' : 'result-wrong'}">${r.is_correct ? '✓ 정답' : '✕ 오답'}</span>
+          ${r.classification?.primary_h ? '<span class="chip chip-h">' + r.classification.primary_h + ' · ' + (r.classification.primary_label || '') + '</span>' : ''}
+        </div>
+        <span style="font-size:11px;color:var(--sub);">${r.created_at || ''}</span>
+      </div>
+      ${r.feedback?.feedback ? '<div style="margin-top:8px;font-size:13px;color:var(--sub);background:var(--bg);padding:10px;border-radius:8px;">' + r.feedback.feedback + '</div>' : ''}
+      ${r.observed_errors?.length ? '<div class="tag-row" style="margin-top:6px;">' + r.observed_errors.map(e => '<span style="font-size:11px;color:var(--err);">• ' + e + '</span>').join('') + '</div>' : ''}
+    </div>
+  `).join('');
+}
+
+// ─── 통계 ───
+async function loadStats() {
+  const resp = await fetch(API + '/stats/error_distribution');
+  const data = await resp.json();
+  const dist = data.distribution || {};
+  const total = data.total_wrong || 0;
+
+  const probResp = await fetch(API + '/admin/problems');
+  const probData = await probResp.json();
+  const totalProblems = probData.total || 0;
+
+  const resResp = await fetch(API + '/results');
+  const resData = await resResp.json();
+  const totalResults = (resData.results || []).length;
+  const correctCount = (resData.results || []).filter(r => r.is_correct).length;
+
+  const hLabels = {
+    H1:'함수 정의', H2:'정의역·공역·치역', H3:'그래프 판정', H4:'일대일·대응',
+    H5:'합성 순서', H6:'역함수 존재', H7:'역함수 식변형', H8:'역함수 그래프',
+    H9:'유리·무리 확장', H10:'근거 부족'
+  };
+  const colors = ['#5B5FEF','#F0703C','#1FB6B0','#E0A62A','#9B5DE5','#E6493C','#17A673','#767893','#F0A93C','#20212E'];
+  const maxCount = Math.max(...Object.values(dist).map(Number), 1);
+
+  document.getElementById('statsContent').innerHTML = `
+    <div class="stat-row">
+      <div class="stat-box"><div class="stat-num" style="color:var(--pri);">${totalProblems}</div><div class="stat-label">등록 문제</div></div>
+      <div class="stat-box"><div class="stat-num">${totalResults}</div><div class="stat-label">총 제출</div></div>
+      <div class="stat-box"><div class="stat-num" style="color:var(--ok);">${totalResults ? Math.round(correctCount/totalResults*100) : 0}%</div><div class="stat-label">정답률</div></div>
+      <div class="stat-box"><div class="stat-num" style="color:var(--err);">${total}</div><div class="stat-label">오답 건수</div></div>
+    </div>
+    <div class="card">
+      <div class="card-title">오답 유형 분포</div>
+      ${total === 0 ? '<div style="text-align:center;color:var(--sub);padding:20px;">아직 데이터가 없습니다</div>' :
+        Object.entries(dist).sort((a,b)=>b[1]-a[1]).map(([h, count], i) => `
+          <div style="margin-bottom:10px;">
+            <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px;">
+              <span style="font-weight:700;">${h} ${hLabels[h] || ''}</span>
+              <span style="color:var(--sub);">${count}건 (${Math.round(count/total*100)}%)</span>
+            </div>
+            <div class="bar" style="width:${Math.round(count/maxCount*100)}%;background:${colors[i%colors.length]};">${count}</div>
+          </div>
+        `).join('')}
+    </div>
+  `;
+}
+
+// 초기 로드
+loadProblems();
+</script>
+</body>
+</html>

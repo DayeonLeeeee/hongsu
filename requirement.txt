@@ -1,0 +1,5 @@
+flask
+anthropic
+google-generativeai
+requests
+gunicorn
