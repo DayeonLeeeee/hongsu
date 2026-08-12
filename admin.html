@@ -130,9 +130,6 @@
     <label>필수 풀이 근거</label>
     <textarea id="fReasoning" rows="2" placeholder="학생이 반드시 보여야 할 근거..."></textarea>
 
-    <label>채점 규칙 (전체)</label>
-    <textarea id="fRules" rows="2" placeholder="채점 시 적용할 전체 규칙..."></textarea>
-
     <label>모범답안</label>
     <textarea id="fModelAnswer" rows="4" placeholder="정석 풀이 전문..."></textarea>
 
@@ -246,7 +243,7 @@ async function loadProblems() {
 function openAddModal() {
   document.getElementById('modalTitle').textContent = '문제 추가';
   document.getElementById('editId').value = '';
-  ['fUnit','fType','fTitle','fStatement','fChoices','fAnswer','fTeacherIntent','fStudentGuide','fObservation','fReasoning','fRules','fModelAnswer','fErrors','fFeedback','fTags'].forEach(id => {
+  ['fUnit','fType','fTitle','fStatement','fChoices','fAnswer','fTeacherIntent','fStudentGuide','fObservation','fReasoning','fModelAnswer','fErrors','fFeedback','fTags'].forEach(id => {
     const el = document.getElementById(id);
     if (el.tagName === 'SELECT') el.selectedIndex = 0;
     else el.value = '';
@@ -271,7 +268,6 @@ async function openEditModal(pid) {
   document.getElementById('fChoices').value = (p.choices || []).join(', ');
   document.getElementById('fAnswer').value = p.correct_answer || '';
   document.getElementById('fReasoning').value = p.required_reasoning || '';
-  document.getElementById('fRules').value = p.grading_rules || '';
   document.getElementById('fModelAnswer').value = p.model_answer || '';
   document.getElementById('fTeacherIntent').value = p.teacher_intent || '';
   document.getElementById('fStudentGuide').value = p.student_guide || '';
@@ -299,7 +295,6 @@ async function saveProblem() {
     choices: choices.length ? choices : null,
     correct_answer: document.getElementById('fAnswer').value,
     required_reasoning: document.getElementById('fReasoning').value,
-    grading_rules: document.getElementById('fRules').value,
     model_answer: document.getElementById('fModelAnswer').value,
     teacher_intent: document.getElementById('fTeacherIntent').value,
     student_guide: document.getElementById('fStudentGuide').value,
