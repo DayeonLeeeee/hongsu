@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#5B5FEF">
+<link rel="manifest" href="/manifest.json">
+<title>홍수</title>
+<style>
+:root{--pri:#5B5FEF;--prid:#4245C9;--pris:#EEEEFD;--bg:#F6F6FC;--card:#fff;--bdr:#E9E9F5;--tx:#20212E;--sub:#767893;--ok:#17A673;--oks:#E7F8F1;--err:#E6493C;--errs:#FDEBEA;--warn:#F0A93C}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{font-family:'Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif;background:var(--bg);color:var(--tx);overflow-x:hidden;min-height:100vh;min-height:100dvh}
+.screen{display:none;flex-direction:column;min-height:100vh;min-height:100dvh}
+.screen.active{display:flex}
+.topbar{padding:16px 20px 8px;position:sticky;top:0;background:var(--bg);z-index:10}
+.back{font-size:13px;color:var(--sub);font-weight:600;cursor:pointer;border:none;background:none;padding:4px 0}
+.title{font-size:20px;font-weight:800;margin-top:4px}
+.sub{font-size:13px;color:var(--sub);margin-top:2px}
+.scroll{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 20px 100px}
+.card{background:var(--card);border:1px solid var(--bdr);border-radius:16px;padding:14px;margin-bottom:10px}
+.chip{display:inline-block;font-size:11px;font-weight:800;padding:3px 8px;border-radius:8px}
+.chip-u{background:#5B5FEF1a;color:#5B5FEF}.chip-d{background:var(--bg);color:var(--sub)}
+.chip-h{background:#E6493C1a;color:#E6493C}
+.btn{border:none;border-radius:14px;padding:14px;font-size:15px;font-weight:800;cursor:pointer;width:100%;text-align:center}
+.btn-pri{background:var(--pri);color:#fff}.btn-dark{background:var(--tx);color:#fff}
+.btn-sec{background:var(--card);border:1px solid var(--bdr);color:var(--tx)}
+.btn-sm{padding:8px 14px;font-size:13px;border-radius:10px}
+.bottom{position:fixed;bottom:0;left:0;right:0;padding:12px 20px;padding-bottom:max(12px,env(safe-area-inset-bottom));background:var(--bg);border-top:1px solid var(--bdr);z-index:20;display:flex;gap:10px}
+.bottom .btn{flex:1}
+.tag-row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+.stat-row{display:flex;gap:10px;margin-bottom:16px}
+.stat-box{flex:1;border-radius:16px;padding:14px}
+.stat-n{font-size:24px;font-weight:800;margin-top:4px}
+.stat-l{font-size:12px;font-weight:700}
+.input-row{display:flex;gap:8px}
+.input-row input{flex:1;border:1px solid var(--bdr);border-radius:100px;padding:11px 16px;font-size:13px;outline:none;background:var(--card)}
+.send-btn{width:42px;height:42px;border-radius:100%;background:var(--pri);border:none;color:#fff;font-size:16px;font-weight:700;cursor:pointer}
+.msg{max-width:85%;border-radius:12px;padding:9px 12px;margin-bottom:6px;font-size:13px;line-height:1.5}
+.msg-u{align-self:flex-end;background:var(--pri);color:#fff}
+.msg-a{align-self:flex-start;background:var(--bg)}
+.step-card{border:1px solid var(--bdr);border-radius:14px;overflow:hidden;background:var(--card);margin-bottom:10px}
+.step-row{display:flex;gap:10px;padding:12px;border-bottom:1px solid var(--bdr)}
+.step-row:last-child{border-bottom:none}
+.step-row.wrong{background:var(--errs)}
+.step-icon{width:24px;height:24px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;flex-shrink:0}
+.dist-row{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.dist-bar-bg{flex:1;height:16px;background:var(--bg);border-radius:4px;overflow:hidden}
+.dist-bar{height:100%;border-radius:4px}
+.feedback-card{background:var(--pris);border-radius:14px;padding:14px}
+.camera-wrap{position:fixed;inset:0;background:#000;z-index:100;display:none;flex-direction:column}
+.camera-wrap.active{display:flex}
+video{width:100%;flex:1;object-fit:cover}
+canvas{display:none}
+.cam-top{position:absolute;top:0;left:0;right:0;padding:16px 20px;padding-top:max(16px,env(safe-area-inset-top));display:flex;justify-content:space-between;z-index:10}
+.cam-btn{width:36px;height:36px;border-radius:18px;background:rgba(42,42,42,.8);border:none;color:#fff;font-size:16px;cursor:pointer}
+.cam-dock{position:absolute;bottom:0;left:0;right:0;padding:20px 36px;padding-bottom:max(20px,env(safe-area-inset-bottom));display:flex;align-items:center;justify-content:center;z-index:10}
+.shutter{width:76px;height:76px;border-radius:38px;background:rgba(255,255,255,.15);padding:5px;border:3px solid #fff;cursor:pointer}
+.shutter-inner{width:100%;height:100%;border-radius:50%;background:#fff}
+.loading{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:60px 20px}
+.spinner{width:32px;height:32px;border:3px solid var(--bdr);border-top-color:var(--pri);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.correct-box{display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1;gap:8px}
+.sol-step{background:var(--card);border:1px solid var(--bdr);border-radius:16px;padding:16px;margin-bottom:12px}
+.sol-num{width:28px;height:28px;border-radius:14px;background:var(--pri);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800}
+.sol-formula{background:var(--bg);border-radius:10px;padding:12px;margin-top:8px;font-size:15px;text-align:center}
+</style>
+</head>
+<body>
+
+<!-- ══════ 홈 ══════ -->
+<div id="s-home" class="screen active">
+  <div class="topbar">
+    <div style="font-size:14px;color:var(--sub);font-weight:600">안녕하세요</div>
+    <div class="title">오늘도 함수 문제 풀어볼까요?</div>
+  </div>
+  <div class="scroll">
+    <div class="stat-row">
+      <div class="stat-box" style="background:var(--pris)">
+        <div class="stat-l" style="color:var(--prid)">등록 문제</div>
+        <div class="stat-n" style="color:var(--prid)" id="home-total">-</div>
+      </div>
+      <div class="stat-box" style="background:var(--oks)">
+        <div class="stat-l" style="color:var(--ok)">정답률</div>
+        <div class="stat-n" style="color:var(--ok)" id="home-rate">-</div>
+      </div>
+    </div>
+    <button class="btn btn-pri" onclick="go('list')" style="margin-bottom:20px">문제 목록에서 풀어보기 →</button>
+    <div style="font-size:13px;font-weight:800;margin-bottom:10px">최근 문제</div>
+    <div id="home-recent"></div>
+  </div>
+</div>
+
+<!-- ══════ 문제 목록 ══════ -->
+<div id="s-list" class="screen">
+  <div class="topbar">
+    <button class="back" onclick="go('home')">‹ 뒤로</button>
+    <div class="title">문제 목록</div>
+    <div class="sub" id="list-count"></div>
+  </div>
+  <div style="padding:0 20px 8px;overflow-x:auto;white-space:nowrap" id="list-chips"></div>
+  <div class="scroll" id="list-items"></div>
+</div>
+
+<!-- ══════ 문제 상세 ══════ -->
+<div id="s-detail" class="screen">
+  <div class="topbar">
+    <button class="back" onclick="go('list')">‹ 뒤로</button>
+    <div id="detail-tags" class="tag-row" style="margin-top:8px"></div>
+  </div>
+  <div class="scroll">
+    <div class="title" id="detail-title" style="margin-bottom:12px"></div>
+    <div class="card" id="detail-stmt" style="font-size:15px;line-height:1.7"></div>
+  </div>
+  <div class="bottom">
+    <button class="btn btn-pri" onclick="openCamera()">📷 풀이 촬영하기</button>
+  </div>
+</div>
+
+<!-- ══════ 카메라 ══════ -->
+<div id="s-camera" class="camera-wrap">
+  <video id="cam-video" autoplay playsinline></video>
+  <canvas id="cam-canvas"></canvas>
+  <div class="cam-top">
+    <button class="cam-btn" onclick="closeCamera()">✕</button>
+    <div style="background:rgba(42,42,42,.8);padding:8px 14px;border-radius:100px;color:#fff;font-size:13px;font-weight:600">풀이를 프레임에 맞춰주세요</div>
+    <div style="width:36px"></div>
+  </div>
+  <div class="cam-dock">
+    <div class="shutter" onclick="capturePhoto()"><div class="shutter-inner"></div></div>
+  </div>
+  <input type="file" id="file-input" accept="image/*" capture="camera" style="display:none" onchange="handleFileSelect(event)">
+</div>
+
+<!-- ══════ OCR 확인 ══════ -->
+<div id="s-ocr" class="screen">
+  <div class="topbar">
+    <button class="back" onclick="go('detail')">‹ 뒤로</button>
+    <div class="title">인식 결과 확인</div>
+  </div>
+  <div class="scroll">
+    <div style="font-size:12px;font-weight:800;color:var(--sub);margin-bottom:6px">인식된 학생 풀이</div>
+    <div id="ocr-loading" class="loading"><div class="spinner"></div><div style="font-size:13px;color:var(--sub)">이미지 인식 중...</div></div>
+    <div id="ocr-result" style="display:none"></div>
+    <div id="ocr-msgs" style="display:flex;flex-direction:column;gap:6px;margin-top:12px"></div>
+  </div>
+  <div class="bottom" style="flex-direction:column;gap:10px">
+    <div class="input-row">
+      <input id="ocr-input" placeholder="예: 2단계에서 x+3을 x-3으로 고쳐줘" onkeydown="if(event.key==='Enter')sendRefine()">
+      <button class="send-btn" onclick="sendRefine()">↑</button>
+    </div>
+    <button class="btn btn-dark" onclick="startGrading()">이대로 채점하기</button>
+  </div>
+</div>
+
+<!-- ══════ 채점 결과 ══════ -->
+<div id="s-grading" class="screen">
+  <div class="topbar">
+    <button class="back" onclick="go('ocr')">‹ 뒤로</button>
+    <div class="title">채점 결과</div>
+    <div class="sub" id="grade-problem-title"></div>
+  </div>
+  <div id="grade-loading" class="loading" style="flex:1"><div class="spinner"></div><div style="font-size:18px;font-weight:700">채점 중...</div><div style="font-size:13px;color:var(--sub)">AI가 풀이를 검증하고 있어요</div></div>
+  <div id="grade-correct" class="correct-box" style="display:none">
+    <div style="font-size:48px">🎉</div>
+    <div style="font-size:24px;font-weight:800;color:var(--ok)">정답이에요!</div>
+    <div id="grade-attempt" style="font-size:14px;color:var(--sub)"></div>
+  </div>
+  <div id="grade-result" class="scroll" style="display:none"></div>
+  <div id="grade-bottom" class="bottom" style="display:none">
+    <button class="btn btn-sec" onclick="showSolution()">해설 보기</button>
+    <button class="btn btn-pri" onclick="retryProblem()">다시 풀어보기 →</button>
+  </div>
+</div>
+
+<!-- ══════ 마스터 해설 ══════ -->
+<div id="s-solution" class="screen">
+  <div class="topbar">
+    <button class="back" onclick="go('grading')">‹ 뒤로</button>
+    <div class="title">마스터 해설</div>
+  </div>
+  <div id="sol-loading" class="loading" style="flex:1"><div class="spinner"></div><div style="font-size:18px;font-weight:700">해설 생성 중...</div></div>
+  <div id="sol-content" class="scroll" style="display:none"></div>
+  <div class="bottom">
+    <button class="btn btn-dark" onclick="go('home')">홈으로 돌아가기</button>
+  </div>
+</div>
+
+<script>
+const API = '';  // 같은 서버
+const UNITS = ['전체','함수','역함수','합성함수','유리함수','무리함수'];
+const UCOLORS = {함수:'#5B5FEF',역함수:'#F0703C',합성함수:'#1FB6B0',유리함수:'#E0A62A',무리함수:'#9B5DE5'};
+const HCOLORS = {H1:'#5B5FEF',H2:'#F0703C',H3:'#1FB6B0',H4:'#E0A62A',H5:'#9B5DE5',H6:'#E6493C',H7:'#17A673',H8:'#767893',H9:'#F0A93C',H10:'#20212E'};
+
+let state = {
+  problems: [],
+  current: null,
+  unit: '전체',
+  photoB64: null,
+  ocrText: '',
+  ocrSteps: [],
+  gradeResult: null,
+  attempts: 1,
+};
+
+// ─── 네비게이션 ───
+function go(screen) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById('s-' + screen).classList.add('active');
+  if (screen === 'home') loadHome();
+  if (screen === 'list') loadList();
+  if (screen === 'detail') loadDetail();
+}
+
+// ─── 홈 ───
+async function loadHome() {
+  const resp = await fetch(API + '/admin/problems');
+  const d = await resp.json();
+  state.problems = d.problems || [];
+  document.getElementById('home-total').textContent = state.problems.length + '개';
+
+  const rr = await fetch(API + '/results');
+  const rd = await rr.json();
+  const results = rd.results || [];
+  const correct = results.filter(r => r.is_correct).length;
+  document.getElementById('home-rate').textContent = results.length ? Math.round(correct/results.length*100) + '%' : '-';
+
+  document.getElementById('home-recent').innerHTML = state.problems.slice(0, 3).map(p => `
+    <div class="card" onclick="state.current=state.problems.find(x=>x.id==='${p.id}');go('detail')" style="cursor:pointer">
+      <div class="tag-row"><span class="chip chip-u">${p.unit}</span></div>
+      <div style="font-size:14px;font-weight:600">${p.title}</div>
+    </div>
+  `).join('');
+}
+
+// ─── 문제 목록 ───
+async function loadList() {
+  const u = state.unit === '전체' ? '' : '?unit=' + encodeURIComponent(state.unit);
+  const resp = await fetch(API + '/admin/problems' + u);
+  const d = await resp.json();
+  state.problems = d.problems || [];
+  document.getElementById('list-count').textContent = `총 ${state.problems.length}문제`;
+
+  document.getElementById('list-chips').innerHTML = UNITS.map(u => `
+    <span class="chip ${state.unit===u?'chip-u':''}" style="cursor:pointer;margin-right:6px;${state.unit===u?'':'background:var(--card);color:var(--sub);border:1px solid var(--bdr)'}" onclick="state.unit='${u}';loadList()">${u}</span>
+  `).join('');
+
+  document.getElementById('list-items').innerHTML = state.problems.map(p => `
+    <div class="card" onclick="state.current=state.problems.find(x=>x.id==='${p.id}');go('detail')" style="cursor:pointer">
+      <div class="tag-row">
+        <span class="chip chip-u" style="background:${UCOLORS[p.unit]||'#5B5FEF'}1a;color:${UCOLORS[p.unit]||'#5B5FEF'}">${p.unit}</span>
+        <span class="chip chip-d">${p.type} · 난이도 ${p.difficulty}</span>
+      </div>
+      <div style="font-size:15px;font-weight:700">${p.title}</div>
+      <div style="font-size:12px;color:var(--sub);margin-top:4px;max-height:36px;overflow:hidden">${(p.statement||'').substring(0,80)}</div>
+    </div>
+  `).join('');
+}
+
+// ─── 문제 상세 ───
+function loadDetail() {
+  const p = state.current;
+  if (!p) return go('list');
+  document.getElementById('detail-tags').innerHTML = `
+    <span class="chip chip-u">${p.unit}</span><span class="chip chip-d">${p.type} · 난이도 ${p.difficulty}</span>
+  `;
+  document.getElementById('detail-title').textContent = p.title;
+  let html = p.statement.replace(/\n/g, '<br>');
+  if (p.choices && p.choices.length) {
+    html += '<div style="margin-top:14px;display:flex;flex-direction:column;gap:8px">';
+    p.choices.forEach((c, i) => { html += `<div style="border:1px solid var(--bdr);border-radius:10px;padding:10px 12px;font-size:14px">${c}</div>`; });
+    html += '</div>';
+  }
+  document.getElementById('detail-stmt').innerHTML = html;
+  state.attempts = 1;
+  state.ocrSteps = [];
+  state.ocrText = '';
+  state.photoB64 = null;
+}
+
+// ─── 카메라 ───
+let camStream = null;
+
+function openCamera() {
+  // 모바일은 파일 선택이 더 안정적
+  if (/Android|iPhone|iPad/i.test(navigator.userAgent)) {
+    document.getElementById('file-input').click();
+    return;
+  }
+  // PC는 getUserMedia
+  const wrap = document.getElementById('s-camera');
+  wrap.classList.add('active');
+  navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280 } } })
+    .then(stream => { camStream = stream; document.getElementById('cam-video').srcObject = stream; })
+    .catch(e => { alert('카메라를 열 수 없습니다: ' + e.message); closeCamera(); });
+}
+
+function closeCamera() {
+  if (camStream) { camStream.getTracks().forEach(t => t.stop()); camStream = null; }
+  document.getElementById('s-camera').classList.remove('active');
+}
+
+function capturePhoto() {
+  const video = document.getElementById('cam-video');
+  const canvas = document.getElementById('cam-canvas');
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+  canvas.toBlob(blob => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      state.photoB64 = reader.result.split(',')[1];
+      closeCamera();
+      go('ocr');
+      doOcr();
+    };
+    reader.readAsDataURL(blob);
+  }, 'image/jpeg', 0.85);
+}
+
+function handleFileSelect(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    state.photoB64 = reader.result.split(',')[1];
+    go('ocr');
+    doOcr();
+  };
+  reader.readAsDataURL(file);
+  event.target.value = '';
+}
+
+// ─── OCR ───
+async function doOcr() {
+  document.getElementById('ocr-loading').style.display = 'flex';
+  document.getElementById('ocr-result').style.display = 'none';
+  document.getElementById('ocr-msgs').innerHTML = '';
+
+  try {
+    const resp = await fetch(API + '/ocr', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: state.photoB64, mime_type: 'image/jpeg', mode: 'solution' }),
+    });
+    const d = await resp.json();
+    if (d.success && d.steps) {
+      state.ocrSteps = d.steps;
+      state.ocrText = d.steps.map(s => 'Step ' + s.index + ': ' + s.text).join('\n');
+    }
+  } catch (e) {
+    state.ocrText = '인식 실패: ' + e.message;
+  }
+
+  document.getElementById('ocr-loading').style.display = 'none';
+  renderOcr();
+}
+
+function renderOcr() {
+  const el = document.getElementById('ocr-result');
+  el.style.display = 'block';
+  if (state.ocrSteps.length) {
+    el.innerHTML = '<div class="step-card">' + state.ocrSteps.map(s => `
+      <div class="step-row"><div style="font-size:11px;font-weight:800;color:var(--pri)">Step ${s.index}</div><div style="font-size:14px;line-height:1.6">${s.text}</div></div>
+    `).join('') + '</div>';
+  } else {
+    el.innerHTML = '<div class="card">' + state.ocrText + '</div>';
+  }
+}
+
+// ─── 자연어 수정 ───
+async function sendRefine() {
+  const input = document.getElementById('ocr-input');
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+
+  const msgsEl = document.getElementById('ocr-msgs');
+  msgsEl.innerHTML += `<div class="msg msg-u">${text}</div>`;
+
+  try {
+    const resp = await fetch(API + '/refine', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: state.photoB64, mime_type: 'image/jpeg', current_text: state.ocrText, instruction: text }),
+    });
+    const d = await resp.json();
+    if (d.success) {
+      state.ocrText = d.corrected_text;
+      state.ocrSteps = d.corrected_text.split('\n').filter(l=>l.trim()).map((l,i) => ({index:i+1, text:l.replace(/^Step \d+:\s*/,'')}));
+      renderOcr();
+      const reply = d.changes.length ? d.changes.map(c=>'"'+c+'"').join(', ')+' 수정했습니다.' : '수정 반영했습니다.';
+      msgsEl.innerHTML += `<div class="msg msg-a">${reply}${d.note?'<br>⚠️ '+d.note:''}</div>`;
+    } else {
+      msgsEl.innerHTML += `<div class="msg msg-a">수정 실패: ${d.error||'다시 시도해주세요'}</div>`;
+    }
+  } catch(e) {
+    msgsEl.innerHTML += `<div class="msg msg-a">오류: ${e.message}</div>`;
+  }
+}
+
+// ─── 채점 ───
+async function startGrading() {
+  go('grading');
+  document.getElementById('grade-loading').style.display = 'flex';
+  document.getElementById('grade-correct').style.display = 'none';
+  document.getElementById('grade-result').style.display = 'none';
+  document.getElementById('grade-bottom').style.display = 'none';
+  document.getElementById('grade-problem-title').textContent = state.current?.title || '';
+
+  try {
+    const resp = await fetch(API + '/grade', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        problem_image_b64: state.photoB64,
+        solution_image_b64: state.photoB64,
+        problem_text: state.current?.statement || '',
+        solution_steps: state.ocrSteps,
+        correct_answer: state.current?.correct_answer || '',
+        grading_rules: state.current?.grading_rules || state.current?.required_reasoning || '',
+      }),
+    });
+    const d = await resp.json();
+    state.gradeResult = d;
+
+    // 결과 저장
+    fetch(API + '/results', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        problem_id: state.current?.id,
+        is_correct: d.is_correct,
+        student_final_answer: d.student_final_answer,
+        error_step_index: d.error_step_index,
+        features: d.features,
+        classification: d.classification,
+        feedback: d.feedback,
+        observed_errors: d.observed_errors,
+        steps: d.steps,
+        ocr_text: state.ocrText,
+      }),
+    }).catch(()=>{});
+
+    document.getElementById('grade-loading').style.display = 'none';
+    if (d.is_correct) {
+      document.getElementById('grade-correct').style.display = 'flex';
+      document.getElementById('grade-attempt').textContent = state.attempts===1?'한 번에 맞췄어요!':`${state.attempts}번 만에 풀었어요`;
+      document.getElementById('grade-bottom').style.display = 'flex';
+    } else {
+      renderGradeResult(d);
+    }
+  } catch(e) {
+    document.getElementById('grade-loading').innerHTML = `<div style="font-size:40px">⚠️</div><div style="font-size:18px;font-weight:700">채점 실패</div><div style="font-size:13px;color:var(--sub)">${e.message}</div><button class="btn btn-sec btn-sm" style="width:auto;margin-top:16px" onclick="startGrading()">다시 시도</button>`;
+  }
+}
+
+function renderGradeResult(d) {
+  const cls = d.classification || {};
+  const fb = d.feedback || {};
+  let html = '';
+
+  // 점수 카드
+  html += `<div class="card" style="padding:20px">
+    <div style="font-size:12px;font-weight:700;color:var(--sub);margin-bottom:6px">${state.current?.title||''}</div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <span style="font-size:28px;font-weight:900;color:var(--err)">오답</span>
+      ${cls.primary_h ? `<span class="chip chip-h" style="background:${HCOLORS[cls.primary_h]||'#E6493C'}1a;color:${HCOLORS[cls.primary_h]||'#E6493C'}">${cls.primary_h} · ${cls.primary_label||''}</span>` : ''}
+    </div>
+    ${cls.secondary_h ? `<div style="font-size:11px;color:var(--sub);margin-top:6px">2순위: ${cls.secondary_h} · ${cls.secondary_label||''} (격차 ${cls.gap||''})</div>` : ''}
+  </div>`;
+
+  // 단계별
+  if (d.steps?.length) {
+    html += '<div style="font-size:13px;font-weight:800;margin:12px 0 8px">단계별 채점</div><div class="step-card">';
+    d.steps.forEach(s => {
+      const isW = s.status==='wrong';
+      const isO = s.status==='ok';
+      html += `<div class="step-row ${isW?'wrong':''}">
+        <div class="step-icon" style="background:${isO?'var(--oks)':isW?'var(--errs)':'var(--bg)'};color:${isO?'var(--ok)':isW?'var(--err)':'var(--sub)'}">${isO?'✓':isW?'✕':'?'}</div>
+        <div style="flex:1"><div style="font-size:14px;line-height:1.6">${s.text}</div>${s.explanation?`<div style="font-size:12px;color:var(--sub);margin-top:4px">${s.explanation}</div>`:''}</div>
+      </div>`;
+    });
+    html += '</div>';
+  }
+
+  // 피드백
+  if (fb.feedback) {
+    html += `<div style="font-size:13px;font-weight:800;margin:12px 0 8px">AI 피드백</div>
+    <div class="feedback-card"><div style="font-size:13px;line-height:1.6;color:var(--prid)">${fb.feedback}</div>
+    ${fb.next_focus?.length ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">'+fb.next_focus.map(f=>'<span style="background:var(--card);border-radius:8px;padding:4px 8px;font-size:11px;font-weight:600">📌 '+f+'</span>').join('')+'</div>':''}
+    </div>`;
+  }
+
+  // 관찰된 실수
+  if (d.observed_errors?.length) {
+    html += `<div style="font-size:13px;font-weight:800;margin:12px 0 8px">관찰된 실수</div><div class="card">`;
+    d.observed_errors.forEach(e => { html += `<div style="font-size:13px;color:var(--err);margin-bottom:4px">• ${e}</div>`; });
+    html += '</div>';
+  }
+
+  // 분포
+  if (cls.distribution) {
+    html += '<div style="font-size:13px;font-weight:800;margin:12px 0 8px">오답 유형 유사도</div><div class="card">';
+    Object.entries(cls.distribution).sort((a,b)=>b[1]-a[1]).slice(0,5).forEach(([h,pct]) => {
+      html += `<div class="dist-row"><div style="width:30px;font-size:11px;font-weight:800">${h}</div><div class="dist-bar-bg"><div class="dist-bar" style="width:${Math.round(pct*100)}%;background:${HCOLORS[h]||'#5B5FEF'}"></div></div><div style="width:32px;font-size:11px;font-weight:700;color:var(--sub);text-align:right">${Math.round(pct*100)}%</div></div>`;
+    });
+    html += '</div>';
+  }
+
+  document.getElementById('grade-result').innerHTML = html;
+  document.getElementById('grade-result').style.display = 'block';
+  document.getElementById('grade-bottom').style.display = 'flex';
+}
+
+function retryProblem() {
+  state.attempts++;
+  state.photoB64 = null;
+  state.ocrSteps = [];
+  state.ocrText = '';
+  openCamera();
+}
+
+// ─── 마스터 해설 ───
+async function showSolution() {
+  go('solution');
+  document.getElementById('sol-loading').style.display = 'flex';
+  document.getElementById('sol-content').style.display = 'none';
+
+  try {
+    const resp = await fetch(API + '/master_solution', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: state.photoB64, mime_type: 'image/jpeg', problem_text: state.current?.statement || '' }),
+    });
+    const d = await resp.json();
+
+    let html = '';
+    // 문제
+    html += `<div class="card"><div style="font-size:10px;font-weight:800;color:var(--sub);letter-spacing:1px;margin-bottom:6px">PROBLEM</div><div style="font-size:14px;line-height:1.7">${state.current?.statement||''}</div></div>`;
+
+    // 메타
+    html += `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+      <span class="chip chip-d">풀이: ${d.method_type||''}</span>
+      <span class="chip" style="background:var(--pris);color:var(--prid)">난이도 · ${d.difficulty||''}</span>
+      <span class="chip" style="background:var(--oks);color:var(--ok)">정답 · ${d.answer||''}</span>
+    </div>`;
+
+    // 단계
+    if (d.steps) {
+      d.steps.forEach(s => {
+        html += `<div class="sol-step">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+            <div class="sol-num">${s.step}</div>
+            <div style="font-size:14px;font-weight:800">${s.title}</div>
+          </div>
+          <div style="font-size:13px;line-height:1.6;color:var(--sub)">${s.content}</div>
+          ${s.formula ? `<div class="sol-formula">${s.formula}</div>` : ''}
+        </div>`;
+      });
+    }
+
+    // 정답
+    html += `<div style="background:var(--oks);border-radius:14px;padding:16px;text-align:center">
+      <div style="font-size:14px">✅</div>
+      <div style="font-size:13px;font-weight:700;color:var(--ok)">모든 단계를 확인했어요</div>
+      <div style="font-size:16px;font-weight:800;color:var(--ok)">정답: ${d.answer||''}</div>
+    </div>`;
+
+    document.getElementById('sol-content').innerHTML = html;
+    document.getElementById('sol-loading').style.display = 'none';
+    document.getElementById('sol-content').style.display = 'block';
+  } catch(e) {
+    document.getElementById('sol-loading').innerHTML = `<div style="font-size:40px">⚠️</div><div>해설 생성 실패: ${e.message}</div>`;
+  }
+}
+
+// 초기 로드
+loadHome();
+</script>
+</body>
+</html>
