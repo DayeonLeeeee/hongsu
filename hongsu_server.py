@@ -407,14 +407,15 @@ def classify_error(student_vector: dict, unit: str = "") -> dict:
     """13차원 벡터 → 각 H와의 거리 + 최근접 유형 + 분포
     unit이 주어지면 해당 단원과 무관한 H코드에 페널티를 줘서 분포를 명확히 함.
     """
-    relevant = UNIT_H_RELEVANCE.get(unit, list(ERROR_PROFILES.keys()))
+    relevant = UNIT_H_RELEVANCE.get(unit, [])
+    print(f"  [분류] unit='{unit}', relevant={relevant}")
 
     distances = {}
     for h, profile in ERROR_PROFILES.items():
         d = euclidean(student_vector, profile)
-        # 해당 단원과 무관한 H코드는 거리 3배 페널티
-        if relevant and h not in relevant and h != "H10":
-            d *= 3.0
+        # 해당 단원과 무관한 H코드는 거리 5배 페널티
+        if relevant and h not in relevant:
+            d *= 5.0
         distances[h] = d
 
     sorted_h = sorted(distances.items(), key=lambda x: x[1])
@@ -425,10 +426,12 @@ def classify_error(student_vector: dict, unit: str = "") -> dict:
     secondary_d = sorted_h[1][1]
     gap = secondary_d - primary_d
 
-    # 분포 (거리 → 유사도 → 정규화)
-    similarities = {h: 1.0 / (1.0 + d) for h, d in distances.items()}
+    # 분포 (거리의 역수 제곱 → 차이를 더 크게)
+    similarities = {h: 1.0 / (1.0 + d) ** 2 for h, d in distances.items()}
     total = sum(similarities.values())
     distribution = {h: round(s / total, 4) for h, s in similarities.items()}
+
+    print(f"  [분류] primary={primary}({round(primary_d,3)}), secondary={secondary}({round(secondary_d,3)}), gap={round(gap,3)}")
 
     return {
         "primary_h": primary,
@@ -1176,23 +1179,14 @@ def save_to_supabase(result_data: dict):
     """채점 결과를 Supabase에 저장 (실패해도 서버는 계속 동작)"""
     sb = get_supabase()
     if not sb:
+        print("  [Supabase] 클라이언트 없음, 스킵")
         return
 
     try:
         cls = result_data.get("classification", {})
         fb = result_data.get("feedback", {})
 
-        # 1. submissions 테이블에 제출 기록
-        sub_row = {
-            "problem_id": result_data.get("problem_id"),
-            "ocr_text": result_data.get("ocr_text", ""),
-        }
-        sub_resp = sb.table("submissions").insert(sub_row).execute()
-        submission_id = None
-        if sub_resp.data:
-            submission_id = sub_resp.data[0].get("submission_id")
-
-        # 2. gradings 테이블에 채점 결과
+        # gradings 테이블에 직접 저장 (FK 없이)
         grade_row = {
             "problem_id": result_data.get("problem_id"),
             "is_correct": result_data.get("is_correct", False),
@@ -1211,14 +1205,15 @@ def save_to_supabase(result_data: dict):
             "total_score": result_data.get("total_score"),
             "model_version": "v2",
         }
-        if submission_id:
-            grade_row["submission_id"] = submission_id
 
-        grade_resp = sb.table("gradings").insert(grade_row).execute()
-        print(f"  [Supabase] 채점 결과 저장 완료")
+        resp = sb.table("gradings").insert(grade_row).execute()
+        if resp.data:
+            print(f"  [Supabase] 채점 결과 저장 완료 (id={resp.data[0].get('grading_id', '?')})")
+        else:
+            print(f"  [Supabase] 저장 응답 이상: {resp}")
 
     except Exception as e:
-        print(f"  [Supabase] 채점 저장 실패 (무시): {e}")
+        print(f"  [Supabase] 채점 저장 실패: {e}")
 
 
 def load_problems_from_supabase():
