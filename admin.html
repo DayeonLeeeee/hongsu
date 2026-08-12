@@ -118,6 +118,15 @@
     <hr style="margin:16px 0;border:none;border-top:1px solid var(--border);">
     <h2 style="font-size:16px;">📝 채점 가이드</h2>
 
+    <label>교사용 의도</label>
+    <textarea id="fTeacherIntent" rows="2" placeholder="이 문항의 출제 의도..."></textarea>
+
+    <label>학생 안내</label>
+    <textarea id="fStudentGuide" rows="2" placeholder="학생에게 보여줄 안내문..."></textarea>
+
+    <label>관찰 지점</label>
+    <textarea id="fObservation" rows="2" placeholder="학생 풀이에서 교사가 볼 지점..."></textarea>
+
     <label>필수 풀이 근거</label>
     <textarea id="fReasoning" rows="2" placeholder="학생이 반드시 보여야 할 근거..."></textarea>
 
@@ -192,7 +201,7 @@ async function loadProblems() {
 function openAddModal() {
   document.getElementById('modalTitle').textContent = '문제 추가';
   document.getElementById('editId').value = '';
-  ['fUnit','fType','fTitle','fStatement','fChoices','fAnswer','fReasoning','fRules','fModelAnswer','fErrors','fFeedback','fTags'].forEach(id => {
+  ['fUnit','fType','fTitle','fStatement','fChoices','fAnswer','fTeacherIntent','fStudentGuide','fObservation','fReasoning','fRules','fModelAnswer','fErrors','fFeedback','fTags'].forEach(id => {
     const el = document.getElementById(id);
     if (el.tagName === 'SELECT') el.selectedIndex = 0;
     else el.value = '';
@@ -217,6 +226,9 @@ async function openEditModal(pid) {
   document.getElementById('fReasoning').value = p.required_reasoning || '';
   document.getElementById('fRules').value = p.grading_rules || '';
   document.getElementById('fModelAnswer').value = p.model_answer || '';
+  document.getElementById('fTeacherIntent').value = p.teacher_intent || '';
+  document.getElementById('fStudentGuide').value = p.student_guide || '';
+  document.getElementById('fObservation').value = p.observation_points || '';
   document.getElementById('fErrors').value = (p.expected_errors || []).join(', ');
   document.getElementById('fFeedback').value = p.feedback_example || '';
   document.getElementById('fTags').value = (p.concept_tags || []).join(', ');
@@ -239,6 +251,9 @@ async function saveProblem() {
     required_reasoning: document.getElementById('fReasoning').value,
     grading_rules: document.getElementById('fRules').value,
     model_answer: document.getElementById('fModelAnswer').value,
+    teacher_intent: document.getElementById('fTeacherIntent').value,
+    student_guide: document.getElementById('fStudentGuide').value,
+    observation_points: document.getElementById('fObservation').value,
     expected_errors: document.getElementById('fErrors').value.split(',').map(s => s.trim()).filter(Boolean),
     feedback_example: document.getElementById('fFeedback').value,
     concept_tags: document.getElementById('fTags').value.split(',').map(s => s.trim()).filter(Boolean),
