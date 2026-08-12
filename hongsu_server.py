@@ -32,10 +32,10 @@ import anthropic
 import google.generativeai as genai
 
 # ─── API 키 ──────────────────────────────────────────
-ANTHROPIC_API_KEY = _os.environ.get("ANTHROPIC_API_KEY", "")
-GEMINI_API_KEY    = _os.environ.get("GEMINI_API_KEY", "")
-MATHPIX_APP_ID  = _os.environ.get("MATHPIX_APP_ID", "")
-MATHPIX_APP_KEY = _os.environ.get("MATHPIX_APP_KEY", "")
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+GEMINI_API_KEY    = os.environ.get("GEMINI_API_KEY", "")
+MATHPIX_APP_ID  = os.environ.get("MATHPIX_APP_ID", "")
+MATHPIX_APP_KEY = os.environ.get("MATHPIX_APP_KEY", "")
 
 # ─── 모델 이름 ───────────────────────────────────────
 MODEL_OPUS   = "claude-opus-4-6"          # 정답, 채점, 해설
