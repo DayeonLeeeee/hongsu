@@ -29,8 +29,6 @@ import statistics
 from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, request, jsonify
 import requests as http_requests
-import anthropic
-import google.generativeai as genai
 
 # ─── API 키 ──────────────────────────────────────────
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -39,13 +37,44 @@ GEMINI_API_KEY    = os.environ.get("GEMINI_API_KEY", "")
 MATHPIX_APP_ID  = os.environ.get("MATHPIX_APP_ID", "")
 MATHPIX_APP_KEY = os.environ.get("MATHPIX_APP_KEY", "")
 
-# ─── 모델 이름 ───────────────────────────────────────
-MODEL_OPUS   = "claude-opus-4-6"          # 정답, 채점, 해설
-MODEL_HAIKU  = "claude-haiku-4-5-20251001" # 수정, 피드백
-MODEL_GEMINI = "gemini-2.5-flash"          # OCR 보조
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
 
-claude_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-genai.configure(api_key=GEMINI_API_KEY)
+# ─── 모델 이름 ───────────────────────────────────────
+MODEL_OPUS   = "claude-opus-4-6"
+MODEL_HAIKU  = "claude-haiku-4-5-20251001"
+MODEL_GEMINI = "gemini-2.5-flash"
+
+claude_client = None
+_gemini_configured = False
+
+def get_claude():
+    global claude_client
+    if claude_client is None:
+        import anthropic
+        claude_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    return claude_client
+
+def get_gemini_model():
+    global _gemini_configured
+    import google.generativeai as genai
+    if not _gemini_configured:
+        genai.configure(api_key=GEMINI_API_KEY)
+        _gemini_configured = True
+    return genai.GenerativeModel(MODEL_GEMINI)
+
+# Supabase 클라이언트 (지연 로드)
+_supabase = None
+def get_supabase():
+    global _supabase
+    if _supabase is None and SUPABASE_URL and SUPABASE_KEY:
+        try:
+            from supabase import create_client
+            _supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+            print("  [Supabase] 연결 성공")
+        except Exception as e:
+            print(f"  [Supabase] 연결 실패: {e}")
+    return _supabase
 
 app = Flask(__name__)
 executor = ThreadPoolExecutor(max_workers=4)
@@ -147,7 +176,7 @@ def call_gemini_ocr(image_b64: str, mime_type: str, mode: str = "problem") -> di
         )
 
     try:
-        model = genai.GenerativeModel(MODEL_GEMINI)
+        model = get_gemini_model()
         response = model.generate_content(
             [instruction, {"mime_type": mime_type, "data": base64.b64decode(image_b64)}],
             generation_config={"response_mime_type": "application/json"},
@@ -364,9 +393,30 @@ def euclidean(v1: dict, v2: dict) -> float:
     return math.sqrt(sum((v1.get(k, 0.5) - v2.get(k, 0.5)) ** 2 for k in FEATURE_KEYS))
 
 
-def classify_error(student_vector: dict) -> dict:
-    """13차원 벡터 → 각 H와의 거리 + 최근접 유형 + 분포"""
-    distances = {h: euclidean(student_vector, p) for h, p in ERROR_PROFILES.items()}
+# 단원별 관련 H코드 (해당 단원에서 주로 발생하는 오류)
+UNIT_H_RELEVANCE = {
+    "함수":     ["H1", "H2", "H3", "H10"],
+    "역함수":   ["H4", "H6", "H7", "H8", "H10"],
+    "합성함수": ["H5", "H2", "H10"],
+    "유리함수": ["H9", "H2", "H10"],
+    "무리함수": ["H9", "H2", "H10"],
+}
+
+
+def classify_error(student_vector: dict, unit: str = "") -> dict:
+    """13차원 벡터 → 각 H와의 거리 + 최근접 유형 + 분포
+    unit이 주어지면 해당 단원과 무관한 H코드에 페널티를 줘서 분포를 명확히 함.
+    """
+    relevant = UNIT_H_RELEVANCE.get(unit, list(ERROR_PROFILES.keys()))
+
+    distances = {}
+    for h, profile in ERROR_PROFILES.items():
+        d = euclidean(student_vector, profile)
+        # 해당 단원과 무관한 H코드는 거리 2배 페널티
+        if relevant and h not in relevant and h != "H10":
+            d *= 2.0
+        distances[h] = d
+
     sorted_h = sorted(distances.items(), key=lambda x: x[1])
 
     primary = sorted_h[0][0]
@@ -646,7 +696,7 @@ def solve_endpoint():
 
 반드시 solve_problem tool로만 응답하세요."""
 
-        response = claude_client.messages.create(
+        response = get_claude().messages.create(
             model=MODEL_OPUS,
             max_tokens=4096,
             temperature=0.0,
@@ -708,7 +758,7 @@ def refine_endpoint():
 
 반드시 refine_ocr_text tool로만 응답하세요."""
 
-        response = claude_client.messages.create(
+        response = get_claude().messages.create(
             model=MODEL_HAIKU,
             max_tokens=1024,
             temperature=0.0,
@@ -763,6 +813,21 @@ def grade_endpoint():
         solution_steps = data.get("solution_steps", [])
         correct_answer = data.get("correct_answer", "")
         grading_rules = data.get("grading_rules", "")
+        problem_id = data.get("problem_id", "")
+        unit = data.get("unit", "")
+
+        # 문제 ID로 추가 정보 조회
+        prob_data = _problems_db.get(problem_id, {})
+        if not unit:
+            unit = prob_data.get("unit", "")
+        if not correct_answer:
+            correct_answer = prob_data.get("correct_answer", "")
+        if not grading_rules:
+            grading_rules = prob_data.get("grading_rules", "")
+        if not problem_text:
+            problem_text = prob_data.get("statement", "")
+        model_answer = prob_data.get("model_answer", "")
+        required_reasoning = prob_data.get("required_reasoning", "")
 
         if not problem_image or not solution_image:
             return jsonify({"success": False, "error": "problem_image_b64와 solution_image_b64 필수"}), 400
@@ -820,7 +885,7 @@ observed_errors: 이미지에서 관찰한 구체적 실수를 짧은 문장으�
 
 반드시 grade_student_solution tool로만 응답하세요."""
 
-        response = claude_client.messages.create(
+        response = get_claude().messages.create(
             model=MODEL_OPUS,
             max_tokens=4096,
             temperature=0.0,
@@ -840,7 +905,7 @@ observed_errors: 이미지에서 관찰한 구체적 실수를 짧은 문장으�
 
         # 특성 벡터 → 최근접 H코드
         features = grading.get("features", {})
-        classification = classify_error(features)
+        classification = classify_error(features, unit=unit)
 
         # 개인화 피드백 생성 (Claude Haiku)
         feedback = generate_feedback(
@@ -905,7 +970,7 @@ def generate_feedback(h_code: str, observed_errors: list, student_context: str) 
 
 반드시 compose_feedback tool로만 응답하세요."""
 
-        response = claude_client.messages.create(
+        response = get_claude().messages.create(
             model=MODEL_HAIKU,
             max_tokens=512,
             temperature=0.3,
@@ -955,7 +1020,7 @@ def master_solution_endpoint():
 
 반드시 solve_problem tool로만 응답하세요."""
 
-        response = claude_client.messages.create(
+        response = get_claude().messages.create(
             model=MODEL_OPUS,
             max_tokens=4096,
             temperature=0.0,
@@ -1023,7 +1088,6 @@ def student_page():
             with open(path, "r", encoding="utf-8") as f:
                 return f.read(), 200, {"Content-Type": "text/html; charset=utf-8"}
     return f"<h1>student.html not found</h1>", 404
-
 
 
 @app.route("/manifest.json")
@@ -1101,10 +1165,47 @@ def measure_consistency_endpoint():
 # 관리 API: 문제 & 채점 가이드라인 CRUD
 # ═══════════════════════════════════════════════════════
 
-# 인메모리 저장소 (서버 재시작하면 초기화. 추후 DB 연결)
+# 인메모리 저장소 (서버 재시작하면 초기화. Supabase가 영구 저장)
 _problems_db = {}   # id -> problem dict
 _results_db = {}    # id -> grading result dict
 _next_id = 1
+
+
+# ─── Supabase 저장 헬퍼 ───
+def save_to_supabase(result_data: dict):
+    """채점 결과를 Supabase에 저장 (실패해도 서버는 계속 동작)"""
+    sb = get_supabase()
+    if not sb:
+        return
+
+    try:
+        cls = result_data.get("classification", {})
+        fb = result_data.get("feedback", {})
+
+        row = {
+            "problem_id": result_data.get("problem_id"),
+            "student_id": result_data.get("student_id", "anonymous"),
+            "is_correct": result_data.get("is_correct", False),
+            "student_answer": result_data.get("student_final_answer", ""),
+            "graded_steps": result_data.get("steps"),
+            "observed_errors": result_data.get("observed_errors"),
+            "features": result_data.get("features"),
+            "primary_h": cls.get("primary_h", ""),
+            "primary_distance": cls.get("primary_distance"),
+            "secondary_h": cls.get("secondary_h"),
+            "secondary_distance": cls.get("secondary_distance"),
+            "gap": cls.get("gap"),
+            "distribution": cls.get("distribution"),
+            "feedback_text": fb.get("feedback", ""),
+            "next_focus": fb.get("next_focus"),
+            "total_score": result_data.get("total_score"),
+            "model_version": "v2",
+        }
+
+        resp = sb.table("gradings").insert(row).execute()
+        print(f"  [Supabase] 채점 결과 저장 완료")
+    except Exception as e:
+        print(f"  [Supabase] 채점 저장 실패 (무시): {e}")
 
 
 def _gen_id():
@@ -1236,6 +1337,8 @@ def save_result():
         "created_at": now_iso(),
     }
     _results_db[rid] = result
+    # Supabase에도 저장
+    save_to_supabase(result)
     print(f"  [결과 저장] {rid}: problem={result['problem_id']}, correct={result['is_correct']}, H={result['classification'].get('primary_h', '?')}")
     return jsonify({"success": True, "result_id": rid})
 
