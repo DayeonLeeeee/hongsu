@@ -101,9 +101,7 @@
       <div><label>유형</label>
         <select id="fType"><option>서술형</option><option>객관식</option></select>
       </div>
-      <div><label>난이도</label>
-        <select id="fDiff"><option>하</option><option>중</option><option>중상</option><option>상</option></select>
-      </div>
+    </div>
     </div>
 
     <label>문제 제목</label>
@@ -176,7 +174,7 @@ async function loadProblems() {
         <div>
           <div class="tag-row">
             <span class="chip chip-unit">${p.unit || ''}</span>
-            <span class="chip chip-diff">${p.type || ''} · 난이도 ${p.difficulty || ''}</span>
+            <span class="chip chip-diff">${p.type || ''}</span>
             <span style="font-size:11px;color:var(--sub);">${p.id}</span>
           </div>
           <div class="card-title" style="margin-top:8px;">${p.title || ''}</div>
@@ -195,7 +193,7 @@ async function loadProblems() {
 function openAddModal() {
   document.getElementById('modalTitle').textContent = '문제 추가';
   document.getElementById('editId').value = '';
-  ['fUnit','fType','fDiff','fTitle','fStatement','fChoices','fAnswer','fReasoning','fRules','fModelAnswer','fErrors','fFeedback','fTags'].forEach(id => {
+  ['fUnit','fType','fTitle','fStatement','fChoices','fAnswer','fReasoning','fRules','fModelAnswer','fErrors','fFeedback','fTags'].forEach(id => {
     const el = document.getElementById(id);
     if (el.tagName === 'SELECT') el.selectedIndex = 0;
     else el.value = '';
@@ -213,7 +211,6 @@ async function openEditModal(pid) {
   document.getElementById('editId').value = pid;
   document.getElementById('fUnit').value = p.unit || '함수';
   document.getElementById('fType').value = p.type || '서술형';
-  document.getElementById('fDiff').value = p.difficulty || '중';
   document.getElementById('fTitle').value = p.title || '';
   document.getElementById('fStatement').value = p.statement || '';
   document.getElementById('fChoices').value = (p.choices || []).join(', ');
@@ -236,7 +233,6 @@ async function saveProblem() {
   const body = {
     unit: document.getElementById('fUnit').value,
     type: document.getElementById('fType').value,
-    difficulty: document.getElementById('fDiff').value,
     title: document.getElementById('fTitle').value,
     statement: document.getElementById('fStatement').value,
     choices: choices.length ? choices : null,
