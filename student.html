@@ -250,7 +250,7 @@ async function loadList() {
     <div class="card" onclick="state.current=state.problems.find(x=>x.id==='${p.id}');go('detail')" style="cursor:pointer">
       <div class="tag-row">
         <span class="chip chip-u" style="background:${UCOLORS[p.unit]||'#5B5FEF'}1a;color:${UCOLORS[p.unit]||'#5B5FEF'}">${p.unit}</span>
-        <span class="chip chip-d">${p.type} · 난이도 ${p.difficulty}</span>
+        <span class="chip chip-d">${p.type}</span>
       </div>
       <div style="font-size:15px;font-weight:700">${p.title}</div>
       <div style="font-size:12px;color:var(--sub);margin-top:4px;max-height:36px;overflow:hidden">${(p.statement||'').substring(0,80)}</div>
@@ -263,7 +263,7 @@ function loadDetail() {
   const p = state.current;
   if (!p) return go('list');
   document.getElementById('detail-tags').innerHTML = `
-    <span class="chip chip-u">${p.unit}</span><span class="chip chip-d">${p.type} · 난이도 ${p.difficulty}</span>
+    <span class="chip chip-u">${p.unit}</span><span class="chip chip-d">${p.type}</span>
   `;
   document.getElementById('detail-title').textContent = p.title;
   let html = p.statement.replace(/\n/g, '<br>');
@@ -543,7 +543,6 @@ async function showSolution() {
     // 메타
     html += `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
       <span class="chip chip-d">풀이: ${d.method_type||''}</span>
-      <span class="chip" style="background:var(--pris);color:var(--prid)">난이도 · ${d.difficulty||''}</span>
       <span class="chip" style="background:var(--oks);color:var(--ok)">정답 · ${d.answer||''}</span>
     </div>`;
 
