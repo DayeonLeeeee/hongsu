@@ -130,11 +130,18 @@
     <label>필수 풀이 근거</label>
     <textarea id="fReasoning" rows="2" placeholder="학생이 반드시 보여야 할 근거..."></textarea>
 
-    <label>채점 규칙</label>
-    <textarea id="fRules" rows="3" placeholder="채점 시 적용할 규칙..."></textarea>
+    <label>채점 규칙 (전체)</label>
+    <textarea id="fRules" rows="2" placeholder="채점 시 적용할 전체 규칙..."></textarea>
 
     <label>모범답안</label>
     <textarea id="fModelAnswer" rows="4" placeholder="정석 풀이 전문..."></textarea>
+
+    <hr style="margin:16px 0;border:none;border-top:1px solid var(--border);">
+    <h2 style="font-size:16px;">📊 부분점수 루브릭</h2>
+    <div style="font-size:11px;color:var(--sub);margin-bottom:10px;">각 기준별 배점과 서술 기준을 입력하세요. 총합이 문제 배점(100점)과 같아야 합니다.</div>
+
+    <div id="rubricList"></div>
+    <button class="btn btn-sec btn-sm" onclick="addRubricRow()" style="width:auto;margin-bottom:12px">+ 루브릭 기준 추가</button>
 
     <label>예상 오류 H코드 (쉼표 구분)</label>
     <input id="fErrors" placeholder="H1, H10">
@@ -154,6 +161,44 @@
 
 <script>
 const API = '';  // 같은 서버에서 서빙하므로 빈 문자열
+
+// ─── 루브릭 관리 ───
+let rubricRows = [];
+const DEFAULT_RUBRICS = [
+  { criterion: '개념 사용', description: '', max_points: 25 },
+  { criterion: '근거 제시', description: '', max_points: 25 },
+  { criterion: '계산·표현', description: '', max_points: 25 },
+  { criterion: '결론', description: '', max_points: 25 },
+];
+
+function renderRubrics() {
+  const el = document.getElementById('rubricList');
+  el.innerHTML = rubricRows.map((r, i) => `
+    <div style="display:flex;gap:8px;margin-bottom:8px;align-items:flex-start;">
+      <div style="flex:2">
+        <input value="${r.criterion}" placeholder="기준명" onchange="rubricRows[${i}].criterion=this.value"
+          style="margin-bottom:0;font-weight:700;">
+      </div>
+      <div style="flex:4">
+        <input value="${r.description || ''}" placeholder="서술 기준 상세..." onchange="rubricRows[${i}].description=this.value"
+          style="margin-bottom:0;">
+      </div>
+      <div style="flex:1">
+        <input type="number" value="${r.max_points}" placeholder="배점" onchange="rubricRows[${i}].max_points=parseInt(this.value)||0"
+          style="margin-bottom:0;text-align:center;">
+      </div>
+      <button class="btn btn-del btn-sm" onclick="rubricRows.splice(${i},1);renderRubrics()" style="width:auto;padding:8px;flex-shrink:0;">✕</button>
+    </div>
+  `).join('');
+  // 총합 표시
+  const total = rubricRows.reduce((s, r) => s + (r.max_points || 0), 0);
+  el.innerHTML += '<div style="text-align:right;font-size:12px;font-weight:700;color:' + (total === 100 ? 'var(--ok)' : 'var(--err)') + ';">총합: ' + total + '점' + (total !== 100 ? ' (100점이 되어야 합니다)' : ' ✓') + '</div>';
+}
+
+function addRubricRow() {
+  rubricRows.push({ criterion: '', description: '', max_points: 25 });
+  renderRubrics();
+}
 
 // ─── 탭 전환 ───
 function switchTab(t) {
@@ -206,6 +251,8 @@ function openAddModal() {
     if (el.tagName === 'SELECT') el.selectedIndex = 0;
     else el.value = '';
   });
+  rubricRows = JSON.parse(JSON.stringify(DEFAULT_RUBRICS));
+  renderRubrics();
   document.getElementById('modal').classList.remove('hidden');
 }
 
@@ -232,6 +279,9 @@ async function openEditModal(pid) {
   document.getElementById('fErrors').value = (p.expected_errors || []).join(', ');
   document.getElementById('fFeedback').value = p.feedback_example || '';
   document.getElementById('fTags').value = (p.concept_tags || []).join(', ');
+  // 루브릭 로드
+  rubricRows = (p.rubric && p.rubric.length) ? JSON.parse(JSON.stringify(p.rubric)) : JSON.parse(JSON.stringify(DEFAULT_RUBRICS));
+  renderRubrics();
   document.getElementById('modal').classList.remove('hidden');
 }
 
@@ -257,6 +307,7 @@ async function saveProblem() {
     expected_errors: document.getElementById('fErrors').value.split(',').map(s => s.trim()).filter(Boolean),
     feedback_example: document.getElementById('fFeedback').value,
     concept_tags: document.getElementById('fTags').value.split(',').map(s => s.trim()).filter(Boolean),
+    rubric: rubricRows.filter(r => r.criterion.trim()),  // 빈 기준 제외
   };
 
   const url = editId ? API + '/admin/problems/' + editId : API + '/admin/problems';
