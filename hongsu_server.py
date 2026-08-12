@@ -16,7 +16,7 @@ suma_server.py  — v2 재설계 서버
     pip install flask openai requests anthropic google-generativeai
     python suma_server.py
 """
-
+import os
 import json
 import base64
 import re
