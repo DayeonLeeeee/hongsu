@@ -6,3 +6,10 @@ cmds = ["pip install -r requirements.txt"]
 
 [start]
 cmd = "gunicorn hongsu_server:app --bind 0.0.0.0:$PORT"
+
+
+[phases.install]
+cmds = ["pip install --no-cache-dir -r requirements.txt"]
+
+[start]
+cmd = "gunicorn hongsu_server:app --bind 0.0.0.0:$PORT --workers 1 --threads 2 --timeout 120 --preload"
