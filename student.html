@@ -468,10 +468,32 @@ function renderGradeResult(d) {
     <div style="font-size:12px;font-weight:700;color:var(--sub);margin-bottom:6px">${state.current?.title||''}</div>
     <div style="display:flex;align-items:center;gap:10px">
       <span style="font-size:28px;font-weight:900;color:var(--err)">오답</span>
+      ${d.total_score != null ? `<span style="font-size:20px;font-weight:800;color:var(--tx)">${d.total_score}점</span>` : ''}
       ${cls.primary_h ? `<span class="chip chip-h" style="background:${HCOLORS[cls.primary_h]||'#E6493C'}1a;color:${HCOLORS[cls.primary_h]||'#E6493C'}">${cls.primary_h} · ${cls.primary_label||''}</span>` : ''}
     </div>
     ${cls.secondary_h ? `<div style="font-size:11px;color:var(--sub);margin-top:6px">2순위: ${cls.secondary_h} · ${cls.secondary_label||''} (격차 ${cls.gap||''})</div>` : ''}
   </div>`;
+
+  // 루브릭별 점수
+  if (d.rubric_scores?.length) {
+    html += '<div style="font-size:13px;font-weight:800;margin:12px 0 8px">부분점수 루브릭</div><div class="card" style="padding:0;overflow:hidden;">';
+    d.rubric_scores.forEach((r, i) => {
+      const pct = r.max_points > 0 ? Math.round(r.points / r.max_points * 100) : 0;
+      const color = pct >= 80 ? 'var(--ok)' : pct >= 40 ? 'var(--warn)' : 'var(--err)';
+      html += `<div style="padding:12px;${i > 0 ? 'border-top:1px solid var(--bdr);' : ''}">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+          <span style="font-size:13px;font-weight:700;">${r.criterion}</span>
+          <span style="font-size:14px;font-weight:800;color:${color}">${r.points}/${r.max_points}</span>
+        </div>
+        <div style="height:6px;background:var(--bg);border-radius:3px;overflow:hidden;margin-bottom:6px;">
+          <div style="height:100%;width:${pct}%;background:${color};border-radius:3px;"></div>
+        </div>
+        ${r.reason ? `<div style="font-size:12px;color:var(--sub);line-height:1.5;">${r.reason}</div>` : ''}
+        ${r.evidence ? `<div style="font-size:11px;color:var(--pri);margin-top:4px;font-style:italic;">"${r.evidence}"</div>` : ''}
+      </div>`;
+    });
+    html += '</div>';
+  }
 
   // 단계별
   if (d.steps?.length) {
