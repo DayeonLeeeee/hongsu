@@ -988,6 +988,19 @@ def master_solution_endpoint():
 def health():
     return jsonify({"status": "ok", "time": now_iso(), "version": "v2"})
 
+@app.route("/admin")
+def admin_page():
+    candidates = [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "admin.html"),
+        os.path.join(os.getcwd(), "admin.html"),
+        "/app/admin.html",
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                return f.read(), 200, {"Content-Type": "text/html; charset=utf-8"}
+    return f"<h1>admin.html not found</h1><p>Tried: {candidates}</p>", 404
+
 
 # ═══════════════════════════════════════════════════════
 # 엔드포인트 7: 일관성 측정 (연구용)
