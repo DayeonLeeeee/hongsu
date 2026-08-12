@@ -821,8 +821,10 @@ def grade_endpoint():
 
         # 문제 ID로 추가 정보 조회
         prob_data = _problems_db.get(problem_id, {})
+        print(f"  [DEBUG] problem_id='{problem_id}', found_in_db={bool(prob_data)}, db_unit='{prob_data.get('unit','')}'")
         if not unit:
             unit = prob_data.get("unit", "")
+        print(f"  [DEBUG] final_unit='{unit}'")
         if not correct_answer:
             correct_answer = prob_data.get("correct_answer", "")
         if not grading_rules:
