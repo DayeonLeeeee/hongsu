@@ -821,17 +821,8 @@ def grade_endpoint():
 
         # 문제 ID로 추가 정보 조회
         prob_data = _problems_db.get(problem_id, {})
-        # problem_id가 비었으면 문제 텍스트로 역추적
-        if not prob_data and problem_text:
-            for pid, p in _problems_db.items():
-                if p.get("statement", "")[:30] in problem_text or problem_text[:30] in p.get("statement", ""):
-                    prob_data = p
-                    problem_id = pid
-                    print(f"  [역추적] problem_text로 매칭: {pid}")
-                    break
         if not unit:
             unit = prob_data.get("unit", "")
-        print(f"  [DEBUG] problem_id='{problem_id}', unit='{unit}'")
         if not correct_answer:
             correct_answer = prob_data.get("correct_answer", "")
         if not grading_rules:
@@ -1194,10 +1185,28 @@ def save_to_supabase(result_data: dict):
     try:
         cls = result_data.get("classification", {})
         fb = result_data.get("feedback", {})
+        problem_id = result_data.get("problem_id", "")
 
-        # gradings 테이블에 직접 저장 (FK 없이)
+        # 1. submissions 저장
+        submission_id = None
+        try:
+            sub_row = {
+                "problem_id": problem_id,
+                "ocr_text": result_data.get("ocr_text", ""),
+                "ocr_steps": result_data.get("solution_steps"),
+                "attempt_number": 1,
+            }
+            sub_resp = sb.table("submissions").insert(sub_row).execute()
+            if sub_resp.data:
+                submission_id = sub_resp.data[0].get("submission_id")
+                print(f"  [Supabase] submission 저장 완료 (id={submission_id})")
+        except Exception as e:
+            print(f"  [Supabase] submission 저장 실패 (무시): {e}")
+
+        # 2. gradings 저장
+        grading_id = None
         grade_row = {
-            "problem_id": result_data.get("problem_id"),
+            "problem_id": problem_id,
             "is_correct": result_data.get("is_correct", False),
             "student_answer": result_data.get("student_final_answer", ""),
             "graded_steps": result_data.get("steps"),
@@ -1214,12 +1223,39 @@ def save_to_supabase(result_data: dict):
             "total_score": result_data.get("total_score"),
             "model_version": "v2",
         }
+        if submission_id:
+            grade_row["submission_id"] = submission_id
 
-        resp = sb.table("gradings").insert(grade_row).execute()
-        if resp.data:
-            print(f"  [Supabase] 채점 결과 저장 완료 (id={resp.data[0].get('grading_id', '?')})")
-        else:
-            print(f"  [Supabase] 저장 응답 이상: {resp}")
+        grade_resp = sb.table("gradings").insert(grade_row).execute()
+        if grade_resp.data:
+            grading_id = grade_resp.data[0].get("grading_id")
+            print(f"  [Supabase] grading 저장 완료 (id={grading_id})")
+
+        # 3. rubric_scores 저장 (문제의 루브릭 + AI 채점 결과가 있으면)
+        if grading_id and problem_id:
+            try:
+                # DB에서 이 문제의 루브릭 조회
+                rub_resp = sb.table("rubrics").select("*").eq("problem_id", problem_id).order("sort_order").execute()
+                rubrics = rub_resp.data if rub_resp.data else []
+
+                # 인메모리에서 루브릭 점수 (AI가 반환했으면)
+                rubric_scores_data = result_data.get("rubric_scores", [])
+
+                if rubrics and rubric_scores_data:
+                    for i, rub in enumerate(rubrics):
+                        score_data = rubric_scores_data[i] if i < len(rubric_scores_data) else {}
+                        row = {
+                            "grading_id": grading_id,
+                            "rubric_id": rub["rubric_id"],
+                            "points": score_data.get("points", 0),
+                            "max_points": rub["max_points"],
+                            "reason": score_data.get("reason", ""),
+                            "evidence": score_data.get("evidence", ""),
+                        }
+                        sb.table("rubric_scores").insert(row).execute()
+                    print(f"  [Supabase] rubric_scores {len(rubrics)}개 저장 완료")
+            except Exception as e:
+                print(f"  [Supabase] rubric_scores 저장 실패 (무시): {e}")
 
     except Exception as e:
         print(f"  [Supabase] 채점 저장 실패: {e}")
