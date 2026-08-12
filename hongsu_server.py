@@ -821,10 +821,17 @@ def grade_endpoint():
 
         # 문제 ID로 추가 정보 조회
         prob_data = _problems_db.get(problem_id, {})
-        print(f"  [DEBUG] problem_id='{problem_id}', found_in_db={bool(prob_data)}, db_unit='{prob_data.get('unit','')}'")
+        # problem_id가 비었으면 문제 텍스트로 역추적
+        if not prob_data and problem_text:
+            for pid, p in _problems_db.items():
+                if p.get("statement", "")[:30] in problem_text or problem_text[:30] in p.get("statement", ""):
+                    prob_data = p
+                    problem_id = pid
+                    print(f"  [역추적] problem_text로 매칭: {pid}")
+                    break
         if not unit:
             unit = prob_data.get("unit", "")
-        print(f"  [DEBUG] final_unit='{unit}'")
+        print(f"  [DEBUG] problem_id='{problem_id}', unit='{unit}'")
         if not correct_answer:
             correct_answer = prob_data.get("correct_answer", "")
         if not grading_rules:
