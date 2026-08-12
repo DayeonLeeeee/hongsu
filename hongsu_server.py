@@ -516,7 +516,7 @@ TOOL_REFINE_TEXT = {
 # ─── (3) 채점 (특성 벡터 추출) ────────────────────────
 TOOL_GRADE_SOLUTION = {
     "name": "grade_student_solution",
-    "description": "학생 풀이의 오류 특성을 13차원 벡터로 추출하고 단계별 판정합니다.",
+    "description": "학생 풀이를 채점합니다: 13차원 특성 벡터 + 루브릭별 부분점수 + 단계별 판정.",
     "input_schema": {
         "type": "object",
         "properties": {
@@ -535,9 +535,24 @@ TOOL_GRADE_SOLUTION = {
                     "required": ["index", "text", "status", "explanation"],
                 },
             },
-            "error_step_index": {
-                "type": ["integer", "null"],
-                "description": "첫 오류 단계 번호 (정답이면 null)",
+            "rubric_scores": {
+                "type": "array",
+                "description": "루브릭 기준별 부분점수. 프롬프트에 주어진 루브릭 순서대로.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "criterion": {"type": "string", "description": "기준명 (예: 개념 사용)"},
+                        "points": {"type": "integer", "description": "부여한 점수 (0 ~ max_points)"},
+                        "max_points": {"type": "integer", "description": "이 기준의 배점"},
+                        "reason": {"type": "string", "description": "왜 이 점수인지 근거 (감점 사유 또는 만점 이유)"},
+                        "evidence": {"type": "string", "description": "학생 풀이에서 뽑은 증거 인용 (없으면 빈 문자열)"},
+                    },
+                    "required": ["criterion", "points", "max_points", "reason", "evidence"],
+                },
+            },
+            "total_score": {
+                "type": "integer",
+                "description": "루브릭 점수 합산 (전체 배점 중 몇 점)",
             },
             "features": {
                 "type": "object",
@@ -563,10 +578,7 @@ TOOL_GRADE_SOLUTION = {
                     "graph_interpretation_error", "has_reasoning", "used_criterion",
                     "gave_counterexample", "final_answer_correct",
                 ],
-                "description": (
-                    "13차원 오류 특성 벡터. 각 값 0.0~1.0. "
-                    "1.0=완벽/명확히 확인, 0.5=애매/해당없음, 0.0=전혀 없음/심각한 오류"
-                ),
+                "description": "13차원 오류 특성 벡터. 각 값 0.0~1.0.",
             },
             "observed_errors": {
                 "type": "array",
@@ -576,7 +588,8 @@ TOOL_GRADE_SOLUTION = {
         },
         "required": [
             "is_correct", "student_final_answer", "steps",
-            "error_step_index", "features", "observed_errors",
+            "rubric_scores", "total_score",
+            "features", "observed_errors",
         ],
     },
 }
@@ -843,30 +856,57 @@ def grade_endpoint():
         if not steps_str:
             steps_str = "(없음)"
 
+        # 루브릭 정보 조립
+        rubric_list = prob_data.get("rubric", [])
+        if rubric_list:
+            rubric_str = "\n".join([
+                f"  {i+1}. {r.get('criterion', '')} ({r.get('max_points', 25)}점): {r.get('description', '')}"
+                for i, r in enumerate(rubric_list)
+            ])
+            total_max = sum(r.get("max_points", 0) for r in rubric_list)
+        else:
+            rubric_str = "  1. 개념 사용 (25점)\n  2. 근거 제시 (25점)\n  3. 계산·표현 (25점)\n  4. 결론 (25점)"
+            total_max = 100
+
         prompt = f"""당신은 고등학교 수학 채점 전문가입니다.
 
 두 이미지를 보고 학생 풀이를 채점하세요:
-- 첫 번째 이미지: 원본 문제
+- 첫 번째 이미지: 원본 문제 (또는 풀이와 동일)
 - 두 번째 이미지: 학생의 손글씨 풀이
 
-[참고 - OCR 평문 결과 (이미지가 항상 우선)]
-문제 텍스트: {problem_text if problem_text else "(없음)"}
-학생 풀이 단계:
-{steps_str}
+[문제 텍스트]
+{problem_text if problem_text else "(이미지에서 직접 확인)"}
 
-[알려진 정답 (있으면)]
+[모범답안]
+{model_answer if model_answer else "(없음)"}
+
+[필수 풀이 근거]
+{required_reasoning if required_reasoning else "(없음)"}
+
+[알려진 정답]
 {correct_answer if correct_answer else "(없음, 스스로 풀어 확인)"}
 
-[채점 규칙]
-{grading_rules if grading_rules else '''
+[학생 풀이 OCR (참고, 이미지가 항상 우선)]
+{steps_str}
+
+[채점 원칙]
 1. 문제를 직접 풀어 정답을 스스로 구한 뒤 학생 풀이를 채점하세요.
 2. 학생이 다른 방법을 써도 논리적으로 타당하면 ok.
 3. 표기 실수는 관대하게, 실제 수학적 오류만 wrong으로.
 4. 최초 오류 단계만 wrong, 그 이후는 depends.
 5. 최종 답이 맞고 논리에 큰 결함 없으면 is_correct=true.
-'''}
 
-[특성 벡터 작성 지침 - 매우 중요]
+[부분점수 루브릭 - 반드시 각 기준별로 점수를 매기세요]
+총 배점: {total_max}점
+{rubric_str}
+
+각 루브릭 기준에 대해:
+- points: 0 ~ max_points 사이 정수. 기준을 완벽히 충족하면 만점, 전혀 못하면 0점.
+- reason: 왜 이 점수를 줬는지 한 문장 (감점 사유 또는 만점 근거).
+- evidence: 학생 풀이에서 해당 부분 직접 인용 (없으면 빈 문자열).
+total_score: 모든 루브릭 points의 합산.
+
+[특성 벡터 작성 지침]
 아래 13개 특성을 각각 0.0~1.0 사이 값으로 매기세요.
 학생 풀이 이미지에서 관찰된 실제 근거로만 판단하세요.
 
@@ -910,6 +950,16 @@ observed_errors: 이미지에서 관찰한 구체적 실수를 짧은 문장으�
         features = grading.get("features", {})
         classification = classify_error(features, unit=unit)
 
+        # 루브릭 점수 추출
+        rubric_scores = grading.get("rubric_scores", [])
+        total_score = grading.get("total_score", 0)
+        if not total_score and rubric_scores:
+            total_score = sum(r.get("points", 0) for r in rubric_scores)
+
+        print(f"  [루브릭] {len(rubric_scores)}개 기준, 총점={total_score}")
+        for rs in rubric_scores:
+            print(f"    {rs.get('criterion')}: {rs.get('points')}/{rs.get('max_points')} - {rs.get('reason','')[:40]}")
+
         # 개인화 피드백 생성 (Claude Haiku)
         feedback = generate_feedback(
             h_code=classification["primary_h"],
@@ -921,8 +971,9 @@ observed_errors: 이미지에서 관찰한 구체적 실수를 짧은 문장으�
             "success": True,
             "is_correct": grading.get("is_correct", False),
             "student_final_answer": grading.get("student_final_answer", ""),
-            "error_step_index": grading.get("error_step_index"),
             "steps": grading.get("steps", []),
+            "rubric_scores": rubric_scores,
+            "total_score": total_score,
             "features": features,
             "observed_errors": grading.get("observed_errors", []),
             "classification": classification,
@@ -932,7 +983,7 @@ observed_errors: 이미지에서 관찰한 구체적 실수를 짧은 문장으�
 
         print(f"  [채점 완료] correct={result['is_correct']}, "
               f"primary={classification['primary_h']} ({classification['primary_label']}), "
-              f"gap={classification['gap']}, typical={classification['is_typical']}")
+              f"total={total_score}, gap={classification['gap']}")
         return jsonify(result)
 
     except Exception as e:
