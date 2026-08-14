@@ -1,6 +1,4 @@
 """
-suma_server.py  — v2 재설계 서버
-─────────────────────────────────
 파이프라인:
   1. 문제 OCR:     Mathpix + Gemini Flash 병렬 → 평문 (표시용)
   2. 문제 AI 풀이:  Claude Opus 4.6 (vision + tool_use) → 정답 + 단계별 풀이
