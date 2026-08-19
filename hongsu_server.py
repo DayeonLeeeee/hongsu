@@ -571,10 +571,7 @@ TOOL_GRADE_SOLUTION = {
                 "items": {"type": "string"},
                 "description": "관찰된 구체적 실수 목록",
             },
-            "continuation_hint": {
-                "type": "string",
-                "description": "최초 오류 단계에서 학생이 어떻게 이어 풀면 되는지 한두 문장 안내. 정답이면 빈 문자열.",
-            },
+
         },
         "required": [
             "is_correct", "student_final_answer", "steps",
@@ -822,7 +819,6 @@ def grade_endpoint():
 5. 최초 오류 단계만 wrong으로 표시하세요.
 6. 최초 오류 이후 단계는 모두 depends로 처리하세요 (오류 전파).
 7. 최종 답이 맞고 논리에 큰 결함 없으면 is_correct=true.
-8. continuation_hint: 최초 오류 단계에서 학생이 어떻게 이어 풀면 되는지 한두 문장으로 안내하세요.
 
 [부분점수 루브릭 - 반드시 각 기준별로 점수를 매기세요]
 총 배점: {total_max}점
