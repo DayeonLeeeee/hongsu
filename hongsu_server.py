@@ -1,18 +1,13 @@
 """
 파이프라인:
-  1. 문제 OCR:     Mathpix + Gemini Flash 병렬 → 평문 (표시용)
-  2. 문제 AI 풀이:  Claude Opus 4.6 (vision + tool_use) → 정답 + 단계별 풀이
-  3. 풀이 OCR:     Mathpix + Gemini Flash 병렬 → 단계별 평문 (표시용)
-  4. 자연어 수정:  Claude Haiku (vision + tool_use)
-  5. 채점:         Claude Opus 4.6 (vision + tool_use)
+  1. 풀이 OCR:     Mathpix + Gemini Flash 병렬 → 단계별 평문 (표시용)
+  2. 자연어 수정:  Claude Haiku (vision + tool_use)
+  3. 채점:         Claude Opus 4.6 (vision + tool_use)
                     → 13차원 특성 벡터 + observed_errors
                     → 코드로 유클리드 거리 → 최근접 H코드
-  6. 개인화 피드백: Claude Haiku (tool_use)
-  7. 해설 (마스터): Claude Opus 4.6 (vision + tool_use)
+  4. 개인화 피드백: Claude Haiku (tool_use)
+  5. 해설 (마스터): Claude Opus 4.6 (vision + tool_use)
 
-실행:
-    pip install flask openai requests anthropic google-generativeai
-    python suma_server.py
 """
 
 import os
@@ -28,7 +23,6 @@ from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, request, jsonify
 import requests as http_requests
 
-
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 GEMINI_API_KEY    = os.environ.get("GEMINI_API_KEY", "")
 
@@ -38,6 +32,7 @@ MATHPIX_APP_KEY = os.environ.get("MATHPIX_APP_KEY", "")
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
 
+# 모델 선택은 실데이터 비교 후 모델 변경 또는 파인튜닝 가능성 검토 예정.
 MODEL_OPUS   = "claude-opus-4-6"
 MODEL_HAIKU  = "claude-haiku-4-5-20251001"
 MODEL_GEMINI = "gemini-2.5-flash"
@@ -60,7 +55,6 @@ def get_gemini_model():
         _gemini_configured = True
     return genai.GenerativeModel(MODEL_GEMINI)
 
-# Supabase 
 
 _supabase = None
 def get_supabase():
@@ -78,16 +72,13 @@ app = Flask(__name__)
 executor = ThreadPoolExecutor(max_workers=4)
 
 
-
-
-
-
+# ─── 공통 유틸 ─────
 def now_iso() -> str:
     return datetime.datetime.now().isoformat()
 
 
 def parse_tool_use(response) -> dict:
-
+    """Claude tool_use 응답에서 첫 tool_use 블록의 input dict를 뽑아내기"""
     for block in response.content:
         if getattr(block, "type", None) == "tool_use":
             return dict(block.input)
@@ -115,9 +106,9 @@ def make_image_block(image_b64: str, mime_type: str = "image/jpeg") -> dict:
     }
 
 
-# ─── 1. Mathpix OCR ───
+# ─── 1. Mathpix OCR ────
 def call_mathpix(image_b64: str, mime_type: str = "image/jpeg") -> str:
-    """Mathpix — 수식 특화. 실패해도 빈 문자열 반환"""
+    """Mathpix — 수식 특화 OCR. 실패해도 빈 문자열 반환 (병렬용)"""
     try:
         url = "https://api.mathpix.com/v3/text"
         headers = {
@@ -139,11 +130,11 @@ def call_mathpix(image_b64: str, mime_type: str = "image/jpeg") -> str:
     return ""
 
 
-# ─── 2. Gemini Flash OCR (평문) ───
+# ─── 2. Gemini Flash OCR (평문) ─────
 def call_gemini_ocr(image_b64: str, mime_type: str, mode: str = "problem") -> dict:
     """
-    Gemini Flash — 평문 OCR (화면에 표시 전용).
-    LaTeX 백슬래시 없이 읽기 쉬운 표기로 출력.
+    Gemini Flash — 평문 OCR (표시 전용).
+    LaTeX 백슬래시 없이 사람이 읽기 쉬운 표기로 출력.
     """
     if mode == "solution":
         instruction = (
@@ -190,9 +181,9 @@ def call_gemini_ocr(image_b64: str, mime_type: str, mode: str = "problem") -> di
         return {"text": "", "problem_number": "", "source": ""}
 
 
-# ─── 3. 평문 정리 (표기 정규화) ───
+# ─── 3. 평문 정리 (표기 정규화) ─────
 def normalize_plain(text: str) -> str:
-    """Gemini가 LaTeX 백슬래시를 뱉으면 평문으로 강제 변환"""
+    """Gemini가 어쩌다 LaTeX 백슬래시를 뱉으면 평문으로 강제 변환"""
     if not text:
         return ""
     s = text
@@ -235,10 +226,11 @@ def normalize_plain(text: str) -> str:
     return s
 
 
+# 오답 유형 프로파일 (H1~H10, 문서)
 
-# 오답 유형 프로파일 (H1~H10, 우선은 문서 기반)
-
-
+# 현재 수치는 오세준 교수님 문서 기반 수작업 추정치.
+# 합성 데이터(가상 학생 오답) 생성 → 반복 실험으로 프로파일 값을 지속 조정 필요
+# H코드 간 프로파일이 가까우면 분류 경계가 불분명해지므로 각 H코드가 충분히 구별되는 수치인지 합성 데이터로 확인 필요.
 FEATURE_KEYS = [
     "checked_uniqueness",          # 입력→출력 유일성
     "checked_definition_domain",   # 정의역/공역/치역 구분
@@ -418,8 +410,28 @@ UNIT_H_RELEVANCE = {
 
 
 def classify_error(student_vector: dict, unit: str = "") -> dict:
-    """13차원 벡터 → 각 H와의 거리 + 최근접 유형 + 분포
+    """현재 계산 방식: (추후 변경 가능 높음)
+    13차원 벡터 → 각 H와의 거리 + 최근접 유형 + 분포
     unit이 주어지면 해당 단원과 무관한 H코드에 페널티를 줘서 분포를 명확히 함.
+
+    [거리 방식]
+    현재 유클리드 거리 + 단원 페널티 방식.
+    축 가중치(현재 균등 1:1), 거리 함수, 페널티 계수 등은 실데이터 기반 최적화 예정.
+    대안(코사인 유사도, 가중 유클리드, 클러스터링 등)도 비교 검토 중.
+
+    [근소 차이 판정]
+    1위와 2위의 거리 차(gap)가 매우 작을 때(예: 0.459 vs 0.458) 순수 수치만으로
+    최종 H코드를 결정하는 것이 적절한지 논의 필요.
+    고려 중인 방안:
+      - gap < 임계값이면 "복합 유형"으로 보고 1위·2위 동시 리포트
+      - 교사 확인(teacher_labels)을 통해 근소 차이 케이스의 판정 기준 수립
+      - 단원·문제 맥락을 가중치로 반영하여 경계 케이스 해소
+
+    [교사-AI 판정 일치도]
+    현직 교사가 판단하는 오답 원인과 LLM이 추출한 특성 벡터 기반 분류가 일치하지 않을 수 있음. 이 오차(Cohen's κ로 측정 예정)를 어떻게 반영할지 논의 필요.
+      - 교사 라벨과 AI 분류가 불일치하는 패턴을 수집하여 프로파일 보정
+      - 특정 H코드에서 체계적 불일치가 발견되면 해당 프로파일 재설계
+      - 불일치율이 높으면 특성 벡터 설계 자체를 재검토
     """
     relevant = UNIT_H_RELEVANCE.get(unit, [])
     print(f"  [분류] unit='{unit}', relevant={relevant}")
@@ -427,7 +439,7 @@ def classify_error(student_vector: dict, unit: str = "") -> dict:
     distances = {}
     for h, profile in ERROR_PROFILES.items():
         d = euclidean(student_vector, profile)
-        # 해당 단원과 무관한 H코드는 거리 페널티... 현재로서는 적용 잘 안 됨.
+        # 해당 단원과 무관한 H코드는 거리 5배 페널티
         if relevant and h not in relevant:
             d *= 5.0
         distances[h] = d
@@ -461,47 +473,9 @@ def classify_error(student_vector: dict, unit: str = "") -> dict:
     }
 
 
+# Tool 정의 (tool_use 강제)
 
-
-
-# ─── (1) 문제 → 정답/풀이 ───
-TOOL_SOLVE_PROBLEM = {
-    "name": "solve_problem",
-    "description": "수학 문제를 스스로 풀어 정답과 단계별 풀이를 반환합니다.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "answer": {
-                "type": "string",
-                "description": "최종 답 (간단한 텍스트, 예: 5, 65, 3/5)",
-            },
-            "method_type": {"type": "string", "description": "풀이 방법 이름"},
-            "concept_tags": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "사용 개념 태그 2~3개",
-            },
-            "steps": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "step": {"type": "integer"},
-                        "title": {"type": "string", "description": "10자 이내"},
-                        "content": {"type": "string", "description": "1~2문장, 수식은 $...$"},
-                        "formula": {"type": "string", "description": "핵심 식 한 줄 $...$"},
-                    },
-                    "required": ["step", "title", "content", "formula"],
-                },
-                "description": "문제 복잡도에 따라 2~5단계",
-            },
-            "verification": {"type": "string", "description": "답을 검산한 한 줄"},
-        },
-        "required": ["answer", "method_type", "concept_tags", "steps", "verification"],
-    },
-}
-
-# ─── (2) 자연어 수정 (문제/풀이 공용) ────
+# ─── (1) 자연어 수정 (문제/풀이 공용) ────
 TOOL_REFINE_TEXT = {
     "name": "refine_ocr_text",
     "description": "사용자의 자연어 수정 지시를 반영해 OCR 평문을 갱신합니다.",
@@ -525,7 +499,7 @@ TOOL_REFINE_TEXT = {
     },
 }
 
-# ─── (3) 채점 (특성 벡터 추출) ─────
+# ─── (3) 채점 (특성 벡터 추출) ────
 TOOL_GRADE_SOLUTION = {
     "name": "grade_student_solution",
     "description": "학생 풀이를 채점합니다: 13차원 특성 벡터 + 루브릭별 부분점수 + 단계별 판정.",
@@ -597,25 +571,33 @@ TOOL_GRADE_SOLUTION = {
                 "items": {"type": "string"},
                 "description": "관찰된 구체적 실수 목록",
             },
+            "continuation_hint": {
+                "type": "string",
+                "description": "최초 오류 단계에서 학생이 어떻게 이어 풀면 되는지 한두 문장 안내. 정답이면 빈 문자열.",
+            },
         },
         "required": [
             "is_correct", "student_final_answer", "steps",
             "rubric_scores", "total_score",
-            "features", "observed_errors",
+            "features", "observed_errors", "continuation_hint",
         ],
     },
 }
 
-# ─── (4) 개인화 피드백 ──────
+# ─── (4) 개인화 피드백 ────
 TOOL_PERSONAL_FEEDBACK = {
     "name": "compose_feedback",
-    "description": "학생 실수와 오답 유형을 종합해 짧고 안내적인 피드백을 생성합니다.",
+    "description": "학생 실수와 오답 유형을 종합해 짧은 피드백과 상세 피드백을 생성합니다.",
     "input_schema": {
         "type": "object",
         "properties": {
             "feedback": {
                 "type": "string",
-                "description": "학생에게 줄 피드백 (2문장 이내, 안내 어조)",
+                "description": "학생에게 줄 핵심 피드백 (2문장 이내, 안내 어조)",
+            },
+            "detailed_feedback": {
+                "type": "string",
+                "description": "학생이 추가 설명을 원할 때 보여줄 상세 피드백 (3~5문장). 왜 틀렸는지, 올바른 접근은 무엇인지, 비슷한 문제에서 주의할 점까지 포함.",
             },
             "next_focus": {
                 "type": "array",
@@ -623,14 +605,12 @@ TOOL_PERSONAL_FEEDBACK = {
                 "description": "다음에 학생이 확인/연습할 것 1~2개",
             },
         },
-        "required": ["feedback", "next_focus"],
+        "required": ["feedback", "detailed_feedback", "next_focus"],
     },
 }
 
 
-
-# 엔드포인트 1: OCR (문제/풀이 공용)
-
+# 엔드포인트 1: OCR
 @app.route("/ocr", methods=["POST"])
 def ocr_endpoint():
     """
@@ -687,73 +667,7 @@ def ocr_endpoint():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
-
-# 엔드포인트 2: 문제 → AI 풀이/정답
-
-@app.route("/solve", methods=["POST"])
-def solve_endpoint():
-    """
-    Claude Opus vision — 문제 이미지에서 직접 정답과 단계별 풀이 생성.
-    /solution 대신 사용 (해설 생성).
-    """
-    try:
-        data = request.get_json()
-        image_b64 = data.get("image", "")
-        mime_type = data.get("mime_type", "image/jpeg")
-        problem_text = data.get("problem_text", "")   # 참고자료 (있으면)
-
-        print(f"\n[문제 풀이 요청] 이미지={len(image_b64)//1024}KB, 참고 텍스트={len(problem_text)}자")
-
-        prompt = f"""당신은 고등학교 수학 모범 풀이 전문가입니다.
-
-첨부된 문제 이미지를 보고 스스로 정확히 풀어 정답과 단계별 풀이를 작성하세요.
-
-[참고 텍스트 (OCR 결과, 이미지가 우선)]
-{problem_text if problem_text else "(없음)"}
-
-[작성 규칙]
-1. 먼저 문제를 직접 풀어 정답을 확인하고 검산하세요.
-2. 정석적이고 교과서적인 풀이로 작성. 여러 풀이법을 나열하지 마세요.
-3. 단계 수는 문제 복잡도에 맞춰 2~5단계로 자연스럽게 조절.
-   - 개념 확인 문제: 2~3단계
-   - 풀이 과정이 있는 문제: 3~4단계
-   - 여러 개념을 연결하는 문제: 4~5단계
-4. title 10자 이내, content 1~2문장, formula 한 줄.
-5. 수식은 $...$ 로 감싸고 한글은 $ 밖에.
-6. answer는 $ 없이 간단한 텍스트로.
-
-반드시 solve_problem tool로만 응답하세요."""
-
-        response = get_claude().messages.create(
-            model=MODEL_OPUS,
-            max_tokens=4096,
-            temperature=0.0,
-            tools=[TOOL_SOLVE_PROBLEM],
-            tool_choice={"type": "tool", "name": "solve_problem"},
-            system="정확한 수학 문제 해결자. 답을 검산하는 습관이 있으며 tool_use로만 응답합니다.",
-            messages=[{
-                "role": "user",
-                "content": [
-                    make_image_block(image_b64, mime_type),
-                    {"type": "text", "text": prompt},
-                ]
-            }],
-        )
-        result = parse_tool_use(response)
-        result["success"] = True
-        result["timestamp"] = now_iso()
-
-        print(f"  [풀이 완료] 정답={result.get('answer')}, "
-              f"단계={len(result.get('steps', []))}")
-        return jsonify(result)
-
-    except Exception as e:
-        print(f"  [풀이 에러] {traceback.format_exc()}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-# 엔드포인트 3: 자연어 수정 (문제/풀이 공용)
-
+# 엔드포인트 2: 자연어 수정
 @app.route("/refine", methods=["POST"])
 def refine_endpoint():
     """
@@ -783,7 +697,7 @@ def refine_endpoint():
 3. 이미지와 다르면 사용자 지적을 우선하되, note 필드로 안내.
 4. 평문 표기 유지 (LaTeX 백슬래시 사용 금지).
 
-반드시 refine_ocr_text tool로만 응답하시오."""
+반드시 refine_ocr_text tool로만 응답하세요."""
 
         response = get_claude().messages.create(
             model=MODEL_HAIKU,
@@ -813,28 +727,24 @@ def refine_endpoint():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
- 
 # 엔드포인트 4: 채점 (특성 벡터 + 최근접 분류)
-
 @app.route("/grade", methods=["POST"])
 def grade_endpoint():
     """
-    Claude Opus vision — 문제/풀이 이미지 직접 보고 채점.
+    Claude Opus vision — 학생 풀이 이미지를 보고 채점.
+    문제 정보는 DB에서 텍스트로 전체 조회.
     → 13차원 특성 벡터 뽑음
     → 코드로 최근접 H코드 결정
     → Claude Haiku로 개인화 피드백 생성
 
     입력:
-      problem_image_b64: 문제 이미지 (필수)
       solution_image_b64: 학생 풀이 이미지 (필수)
-      problem_text: OCR 평문 (참고용, 선택)
+      problem_id: DB 문제 ID (필수 — 문제 텍스트·정답·루브릭 등 조회)
       solution_steps: [{index, text}] OCR 평문 단계별 (참고용, 선택)
-      correct_answer: 정답 (있으면 전달, 없으면 서버가 판단)
-      grading_rules: 채점 룰 텍스트 (입력된 문서 기반, 선택)
+      unit: 단원명 (선택, problem_id로 자동 조회)
     """
     try:
         data = request.get_json()
-        problem_image = data.get("problem_image_b64", "")
         solution_image = data.get("solution_image_b64", "")
         problem_text = data.get("problem_text", "")
         solution_steps = data.get("solution_steps", [])
@@ -857,11 +767,11 @@ def grade_endpoint():
         required_reasoning = prob_data.get("required_reasoning", "")
         observation_points = prob_data.get("observation_points", "")
 
-        if not problem_image or not solution_image:
-            return jsonify({"success": False, "error": "problem_image_b64와 solution_image_b64 필수"}), 400
+        if not solution_image:
+            return jsonify({"success": False, "error": "solution_image_b64 필수"}), 400
 
-        print(f"\n[채점 요청] 문제 이미지={len(problem_image)//1024}KB, "
-              f"풀이 이미지={len(solution_image)//1024}KB, 참고 단계={len(solution_steps)}개")
+        print(f"\n[채점 요청] 풀이 이미지={len(solution_image)//1024}KB, "
+              f"problem_id={problem_id}, 참고 단계={len(solution_steps)}개")
 
         # 참고 텍스트 조립
         steps_str = "\n".join([f"  Step {s.get('index')}: {s.get('text')}" for s in solution_steps])
@@ -883,20 +793,14 @@ def grade_endpoint():
         # 관찰 지점 조립
         obs_section = ""
         if observation_points:
-            obs_section = f"""
-
-[관찰 지점 — 이 문제에서 특히 주의해서 볼 부분]
-{observation_points}
-"""
+            obs_section = f"\n[관찰 지점 — 이 문제에서 특히 주의해서 볼 부분]\n{observation_points}\n"
 
         prompt = f"""당신은 고등학교 수학 채점 전문가입니다.
 
-두 이미지를 보고 학생 풀이를 채점하세요:
-- 첫 번째 이미지: 원본 문제 (또는 풀이와 동일)
-- 두 번째 이미지: 학생의 손글씨 풀이
+첨부된 이미지는 학생의 손글씨 풀이입니다. 아래 문제 정보와 대조하여 채점하세요.
 
 [문제 텍스트]
-{problem_text if problem_text else "(이미지에서 직접 확인)"}
+{problem_text if problem_text else "(제공 안 됨)"}
 
 [모범답안]
 {model_answer if model_answer else "(없음)"}
@@ -910,12 +814,15 @@ def grade_endpoint():
 [학생 풀이 OCR (참고, 이미지가 항상 우선)]
 {steps_str}
 
-[채점 원칙]
+[채점 원칙 — 위에서부터 순차 채점]
 1. 문제를 직접 풀어 정답을 스스로 구한 뒤 학생 풀이를 채점하세요.
-2. 학생이 다른 방법을 써도 논리적으로 타당하면 ok.
-3. 표기 실수는 관대하게, 실제 수학적 오류만 wrong으로.
-4. 최초 오류 단계만 wrong, 그 이후는 depends.
-5. 최종 답이 맞고 논리에 큰 결함 없으면 is_correct=true.
+2. 학생 풀이를 첫 단계부터 순서대로 읽으며 채점하세요.
+3. 학생이 다른 방법을 써도 논리적으로 타당하면 ok.
+4. 표기 실수는 관대하게, 실제 수학적 오류만 wrong으로.
+5. 최초 오류 단계만 wrong으로 표시하세요.
+6. 최초 오류 이후 단계는 모두 depends로 처리하세요 (오류 전파).
+7. 최종 답이 맞고 논리에 큰 결함 없으면 is_correct=true.
+8. continuation_hint: 최초 오류 단계에서 학생이 어떻게 이어 풀면 되는지 한두 문장으로 안내하세요.
 
 [부분점수 루브릭 - 반드시 각 기준별로 점수를 매기세요]
 총 배점: {total_max}점
@@ -930,7 +837,7 @@ total_score: 모든 루브릭 points의 합산.
 [특성 벡터 — 3단계 앵커 기준]
 학생 풀이 이미지에서 관찰된 실제 근거로만 판단하세요. 각 값 0.0~1.0.
 
-A. 개념·조건 축 (확인 여부: 1.0=확실히 확인, 0.0=전혀 안 함)
+A. 개념·조건 축 (1.0=확실히 확인, 0.0=전혀 안 함)
 - checked_uniqueness:
   0.0 = 유일성 개념을 전혀 언급/확인하지 않음
   0.5 = 관련 없는 문제이거나, 언급은 했으나 적용이 불완전
@@ -1003,7 +910,6 @@ observed_errors: 이미지에서 관찰한 구체적 실수를 짧은 문장으�
             messages=[{
                 "role": "user",
                 "content": [
-                    make_image_block(problem_image, "image/jpeg"),
                     make_image_block(solution_image, "image/jpeg"),
                     {"type": "text", "text": prompt},
                 ]
@@ -1025,7 +931,7 @@ observed_errors: 이미지에서 관찰한 구체적 실수를 짧은 문장으�
         for rs in rubric_scores:
             print(f"    {rs.get('criterion')}: {rs.get('points')}/{rs.get('max_points')} - {rs.get('reason','')[:40]}")
 
-        # 개인화 피드백 생성 (Claude Haiku)
+        # 개인화 피드백 생성 (Haiku)
         feedback = generate_feedback(
             h_code=classification["primary_h"],
             observed_errors=grading.get("observed_errors", []),
@@ -1037,6 +943,7 @@ observed_errors: 이미지에서 관찰한 구체적 실수를 짧은 문장으�
             "is_correct": grading.get("is_correct", False),
             "student_final_answer": grading.get("student_final_answer", ""),
             "steps": grading.get("steps", []),
+            "continuation_hint": grading.get("continuation_hint", ""),
             "rubric_scores": rubric_scores,
             "total_score": total_score,
             "features": features,
@@ -1057,14 +964,14 @@ observed_errors: 이미지에서 관찰한 구체적 실수를 짧은 문장으�
 
 
 def generate_feedback(h_code: str, observed_errors: list, student_context: str) -> dict:
-    """Claude Haiku로 개인화 피드백 생성"""
+    """Claude Haiku로 개인화 피드백 생성 (짧은 + 상세 이중 구조)"""
     try:
         template = FEEDBACK_TEMPLATES.get(h_code, "")
         concepts = MISSING_CONCEPTS.get(h_code, [])
         label = ERROR_LABELS.get(h_code, h_code)
         flow = RECOMMENDED_FLOW.get(h_code, "")
 
-        prompt = f"""학생에게 줄 짧은 피드백을 작성하세요.
+        prompt = f"""학생에게 줄 피드백을 작성하세요. 짧은 버전과 상세 버전 두 가지를 모두 만드세요.
 
 [진단된 오답 유형]
 {h_code}: {label}
@@ -1085,13 +992,11 @@ def generate_feedback(h_code: str, observed_errors: list, student_context: str) 
 {student_context}
 
 [규칙]
-1. 학생 풀이의 구체적 증거를 언급하며 시작.
-2. 빠진 개념을 한두 개로 좁혀서 짚기.
-3. 다음에 무엇을 확인할지 안내.
-4. 두 문장 이내로 짧게.
-5. "틀렸다"보다 "다음에 어떻게 하면 되는지" 어조.
-6. 표준 피드백 예시를 그대로 복사하지 말고, 이 학생의 실수에 맞게 변형하세요.
-7. next_focus에는 추천 학습 흐름에서 이 학생에게 가장 필요한 1~2개를 골라 넣으세요.
+1. feedback (짧은 피드백): 학생 풀이의 구체적 증거를 언급하며 시작. 빠진 개념을 짚고, 다음에 뭘 확인할지 안내. 2문장 이내.
+2. detailed_feedback (상세 피드백): 왜 이 부분이 틀렸는지 설명하고, 올바른 접근법을 보여주고, 비슷한 문제에서 주의할 점까지 안내. 3~5문장.
+3. "틀렸다"보다 "다음에 어떻게 하면 되는지" 어조.
+4. 표준 피드백 예시를 그대로 복사하지 말고, 이 학생의 실수에 맞게 변형하세요.
+5. next_focus에는 추천 학습 흐름에서 이 학생에게 가장 필요한 1~2개를 골라 넣으세요.
 
 반드시 compose_feedback tool로만 응답하세요."""
 
@@ -1112,67 +1017,50 @@ def generate_feedback(h_code: str, observed_errors: list, student_context: str) 
         }
 
 
-# 엔드포인트 5: 마스터 해설 (문제 이미지 → 상세 해설)
+
+# 엔드포인트 5: 모범답안 해설 (DB 조회)
 @app.route("/master_solution", methods=["POST"])
 def master_solution_endpoint():
-    """
-    문제 이미지를 vision으로 읽어 마스터 해설 생성.
-    내부적으로 /solve와 같은 tool을 재사용.
-    """
+    """DB에 저장된 모범답안(model_answer)을 반환."""
     try:
         data = request.get_json()
-        image_b64 = data.get("image", "")
-        mime_type = data.get("mime_type", "image/jpeg")
+        problem_id = data.get("problem_id", "")
         problem_text = data.get("problem_text", "")
 
-        print(f"\n[마스터 해설 요청] 이미지={len(image_b64)//1024}KB")
+        prob_data = _problems_db.get(problem_id, {})
 
-        prompt = f"""당신은 고등학교 수학 해설 전문가입니다.
+        if not prob_data and problem_text:
+            for p in _problems_db.values():
+                if problem_text.strip() in p.get("statement", ""):
+                    prob_data = p
+                    break
 
-첨부된 문제 이미지를 보고 학생용 마스터 해설을 작성하세요.
+        if not prob_data:
+            return jsonify({"success": False, "error": "문제를 찾을 수 없습니다"}), 404
 
-[참고 텍스트 (OCR, 이미지가 우선)]
-{problem_text if problem_text else "(없음)"}
+        model_answer = prob_data.get("model_answer", "")
+        if not model_answer:
+            return jsonify({"success": False, "error": "모범답안이 등록되지 않았습니다"}), 404
 
-[해설 원칙]
-1. 정답을 스스로 검산.
-2. 가장 정석적인 하나의 풀이만 제시. 다른 풀이법 나열 금지.
-3. 단계 수는 문제 복잡도에 맞춰 2~5단계로 자연스럽게 조절.
-4. title 10자 이내, content 1~2문장, formula 한 줄.
-5. 학생이 이해할 수 있게 명확히.
-6. 학생이 자주 틀리는 부분이 있으면 "주의" 한 줄로 짚어 주세요.
-
-반드시 solve_problem tool로만 응답하시오."""
-
-        response = get_claude().messages.create(
-            model=MODEL_OPUS,
-            max_tokens=4096,
-            temperature=0.0,
-            tools=[TOOL_SOLVE_PROBLEM],
-            tool_choice={"type": "tool", "name": "solve_problem"},
-            system="수학 해설 전문가. 검산 후 정석 풀이 하나만 tool_use로 반환.",
-            messages=[{
-                "role": "user",
-                "content": [
-                    make_image_block(image_b64, mime_type),
-                    {"type": "text", "text": prompt},
-                ]
-            }],
-        )
-        result = parse_tool_use(response)
-        result["success"] = True
-        result["timestamp"] = now_iso()
-
-        print(f"  [해설 완료] 정답={result.get('answer')}, "
-              f"단계={len(result.get('steps', []))}")
-        return jsonify(result)
+        return jsonify({
+            "success": True,
+            "problem_id": prob_data.get("id", problem_id),
+            "title": prob_data.get("title", ""),
+            "correct_answer": prob_data.get("correct_answer", ""),
+            "model_answer": model_answer,
+            "required_reasoning": prob_data.get("required_reasoning", ""),
+            "concept_tags": prob_data.get("concept_tags", []),
+            "timestamp": now_iso(),
+        })
 
     except Exception as e:
         print(f"  [해설 에러] {traceback.format_exc()}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+
 # 엔드포인트 6: 헬스체크
+
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok", "time": now_iso(), "version": "v2"})
@@ -1229,12 +1117,12 @@ def manifest():
 def measure_consistency_endpoint():
     """
     같은 입력으로 채점을 여러 번 실행해서 재현 일관성을 측정.
-    연구 목적 (Cohen's κ, 벡터 안정성 등).
+    연구 목적 (Cohen's k, 벡터 안정성 등).
 
     입력:
-      problem_image_b64, solution_image_b64
+      solution_image_b64: 학생 풀이 이미지
+      problem_id: DB 문제 ID
       n_runs: 반복 횟수 (기본 3, 최대 5)
-      grading_rules (선택)
     """
     try:
         data = request.get_json()
@@ -1279,15 +1167,17 @@ def measure_consistency_endpoint():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+# ═══════════════════════════════════════════════════════
 # 관리 API: 문제 & 채점 가이드라인 CRUD
+# ═══════════════════════════════════════════════════════
 
-# 인메모리 저장소 (서버 재시작하면 초기화. Supabase 통해성 영구 저장)
+# 인메모리 저장소 (서버 재시작하면 초기화. Supabase가 영구 저장)
 _problems_db = {}   # id -> problem dict
 _results_db = {}    # id -> grading result dict
 _next_id = 1
 
 
-# ─── Supabase 저장 ───
+# ─── Supabase 저장 헬퍼 ───
 def save_to_supabase(result_data: dict):
     """채점 결과를 Supabase에 저장 (실패해도 서버는 계속 동작)"""
     sb = get_supabase()
@@ -1446,7 +1336,7 @@ def add_problem():
         # 채점 가이드라인 (교수님 문서 기반)
         "grading_rules": data.get("grading_rules", ""),             # 전체 채점 룰 텍스트
         "required_reasoning": data.get("required_reasoning", ""),   # 필수 풀이 근거
-        "observation_points": data.get("observation_points", ""),   # 관찰 지점 (교수님 문서)
+        "observation_points": data.get("observation_points", ""),   # 관찰 지점
         "rubric": data.get("rubric", []),                           # 부분점수 루브릭 [{기준, 서술 기준}, ...]
         "expected_errors": data.get("expected_errors", []),         # 예상 오류 H코드 목록
         "model_answer": data.get("model_answer", ""),               # 모범답안 텍스트
@@ -1511,7 +1401,9 @@ def bulk_add_problems():
     return jsonify({"success": True, "added_ids": added, "total": len(_problems_db)})
 
 
+# ═══════════════════════════════════════════════════════
 # 학생 결과 저장/조회 API
+# ═══════════════════════════════════════════════════════
 @app.route("/results", methods=["POST"])
 def save_result():
     """채점 결과 저장"""
@@ -1578,17 +1470,18 @@ def error_distribution():
     })
 
 
-# 오세준 교수님 문서 기반 문제 초기 등록 (서버 시작 시)
+# ═══════════════════════════════════════════════════════
+# 교수님 문서 기반 문제 초기 등록 (서버 시작 시)
+# ═══════════════════════════════════════════════════════
 def load_initial_problems():
     """교수님 문서의 문항 1~10 초기 등록"""
     initial = [
         {
-            "id": "Q01", "unit": "함수", "type": "서술형",
-            "title": "대응 관계가 함수인지 판정하기",
+            "id": "Q01", "unit": "함수", "type": "서술형",            "title": "대응 관계가 함수인지 판정하기",
+            "observation_points": "학생이 '모든 y가 쓰였는가'를 함수 조건으로 오해하는지, 또는 '서로 다른 x가 같은 y로 가면 안 된다'고 생각하는지 본다.",
             "statement": "집합 X={1,2,3}, Y={a,b,c}에 대하여 두 대응 A, B가 있다.\nA: 1→a, 2→b, 3→b\nB: 1→a, 2→b와 2→c, 3→a\nA와 B가 각각 X에서 Y로의 함수인지 판정하고, 그 이유를 쓰시오.",
             "correct_answer": "A는 함수, B는 함수가 아님",
             "required_reasoning": "각 x가 Y의 원소 하나에만 대응하는지 확인한다.",
-            "observation_points": "학생이 '모든 y가 쓰였는가'를 함수 조건으로 오해하는지, 또는 '서로 다른 x가 같은 y로 가면 안 된다'고 생각하는지 본다.",
             "expected_errors": ["H1", "H10"],
             "model_answer": "A는 함수이다. X의 각 원소 1, 2, 3이 각각 Y의 원소 하나에만 대응한다. 2와 3이 같은 b에 대응해도 함수 조건에는 어긋나지 않는다. B는 함수가 아니다. 입력값 2가 b와 c 두 원소에 동시에 대응하므로 함수가 아니다.",
             "feedback_example": "좋은 풀이는 A와 B를 각각 확인합니다. 특히 B에서는 입력값 2 하나만 자세히 보면 함수가 아닌 이유가 드러납니다.",
@@ -1603,8 +1496,7 @@ def load_initial_problems():
             "score": 100,
         },
         {
-            "id": "Q02", "unit": "함수", "type": "서술형",
-            "title": "그래프가 함수인지 판정하기",
+            "id": "Q02", "unit": "함수", "type": "서술형",            "title": "그래프가 함수인지 판정하기",
             "observation_points": "'곡선이 하나라서 함수'라고 쓰면 H3 가능성이 높다. x=0 같은 구체적 값을 넣는지 확인한다.",
             "statement": "좌표평면 위의 두 그래프 G1(y=x²-1)과 G2(x=y²-1)가 y를 x의 함수로 나타내는 그래프인지 판정하고, 판정 기준을 설명하시오.",
             "correct_answer": "G1은 함수의 그래프, G2는 함수의 그래프가 아님",
@@ -1621,8 +1513,7 @@ def load_initial_problems():
             "score": 100,
         },
         {
-            "id": "Q03", "unit": "함수", "type": "서술형",
-            "title": "정의역, 공역, 치역 구하기",
+            "id": "Q03", "unit": "함수", "type": "서술형",            "title": "정의역, 공역, 치역 구하기",
             "observation_points": "공역 R을 그대로 치역으로 쓰는지, 중복값 0과 3을 처리하는지 본다.",
             "statement": "함수 f:{-2,-1,0,1,2}→R가 f(x)=x²-1로 정의되어 있다. 이 함수의 정의역, 공역, 치역을 각각 구하고, 치역을 구한 과정을 쓰시오.",
             "correct_answer": "정의역 {-2,-1,0,1,2}, 공역 R, 치역 {-1,0,3}",
@@ -1632,8 +1523,7 @@ def load_initial_problems():
             "score": 100,
         },
         {
-            "id": "Q04", "unit": "함수", "type": "서술형",
-            "title": "일대일함수와 일대일대응 판단하기",
+            "id": "Q04", "unit": "함수", "type": "서술형",            "title": "일대일함수와 일대일대응 판단하기",
             "observation_points": "일대일함수라고 판단한 뒤 d가 남는다는 사실을 놓치면 H4로 본다.",
             "statement": "함수 f:X→{a,b,c,d}에서 X={1,2,3}이고 f(1)=a, f(2)=b, f(3)=c이다. 이 함수가 일대일함수인지, 일대일대응인지 각각 판단하고 이유를 쓰시오.",
             "correct_answer": "일대일함수이지만 일대일대응은 아님",
@@ -1643,9 +1533,8 @@ def load_initial_problems():
             "score": 100,
         },
         {
-            "id": "Q05", "unit": "합성함수", "type": "서술형",
-            "title": "합성함수의 순서 설명하기",
-            "observation_points": "값만 계산한 학생에게는 H10을 보조 코드로 붙일 수 있다. 두 값을 같게 처리하면 H5가 주 코드다.",
+            "id": "Q05", "unit": "합성함수", "type": "서술형",            "title": "합성함수의 순서 설명하기",
+            "observation_points": "값만 계산하고 순서 설명을 안 하면 H10, 두 값을 같게 처리하면 H5가 주 코드.",
             "statement": "두 함수 f(x)=2x-1, g(x)=x²+3에 대하여 (f∘g)(-2)와 (g∘f)(-2)를 각각 구하시오. 두 값이 달라지는 이유를 합성 순서와 관련하여 설명하시오.",
             "correct_answer": "(f∘g)(-2)=13, (g∘f)(-2)=28",
             "required_reasoning": "안쪽 함수가 먼저 적용되고 바깥 함수가 나중에 적용됨을 계산 과정에 드러낸다.",
@@ -1654,8 +1543,7 @@ def load_initial_problems():
             "score": 100,
         },
         {
-            "id": "Q06", "unit": "합성함수", "type": "서술형",
-            "title": "합성이 가능한 조건 판단하기",
+            "id": "Q06", "unit": "합성함수", "type": "서술형",            "title": "합성이 가능한 조건 판단하기",
             "observation_points": "정의역·공역 조건 없이 수식 계산만 하면 H5 또는 H2가 나타날 수 있다.",
             "statement": "함수 f:{1,2,3}→{4,5}, g:{4,5}→{0,1}. g∘f가 정의되는지 판단하고, (g∘f)(2)를 구하시오. 또한 f∘g가 정의되기 어려운 이유를 설명하시오.",
             "correct_answer": "g∘f는 정의됨, (g∘f)(2)=1, f∘g는 정의 어려움",
@@ -1665,8 +1553,7 @@ def load_initial_problems():
             "score": 100,
         },
         {
-            "id": "Q07", "unit": "역함수", "type": "서술형",
-            "title": "역함수 존재 여부 판단하기",
+            "id": "Q07", "unit": "역함수", "type": "서술형",            "title": "역함수 존재 여부 판단하기",
             "observation_points": "g(x)=x²에서 -1과 1을 비교하지 않으면 H6으로 본다.",
             "statement": "두 함수 f:{1,2,3}→{2,4,6}, f(x)=2x와 g:{-1,0,1}→{0,1}, g(x)=x²가 있다. 각 함수의 역함수가 존재하는지 판단하고, 존재한다면 한 가지 역함숫값을 구하시오.",
             "correct_answer": "f는 역함수 존재 (f⁻¹(6)=3), g는 존재하지 않음",
@@ -1676,9 +1563,8 @@ def load_initial_problems():
             "score": 100,
         },
         {
-            "id": "Q08", "unit": "역함수", "type": "서술형",
-            "title": "역함수 식과 그래프 관계 설명하기",
-            "observation_points": "식 변형은 맞지만 그래프 설명이 빠지면 H10, 식 변형 오류는 H7, 대칭 설명 오류는 H8로 본다.",
+            "id": "Q08", "unit": "역함수", "type": "서술형",            "title": "역함수 식과 그래프 관계 설명하기",
+            "observation_points": "식 변형은 맞지만 그래프 설명이 빠지면 H10, 식 변형 오류는 H7, 대칭 설명 오류는 H8.",
             "statement": "함수 f(x)=3x-2의 역함수를 구하고, 함수 y=f(x)의 그래프와 역함수의 그래프가 어떤 관계인지 설명하시오.",
             "correct_answer": "f⁻¹(x)=(x+2)/3, y=x에 대하여 대칭",
             "required_reasoning": "y=3x-2에서 x를 y에 대한 식으로 나타낸 뒤 x와 y를 바꾼다.",
@@ -1687,8 +1573,7 @@ def load_initial_problems():
             "score": 100,
         },
         {
-            "id": "Q09", "unit": "유리함수", "type": "서술형",
-            "title": "유리함수의 정의역, 치역, 점근선 찾기",
+            "id": "Q09", "unit": "유리함수", "type": "서술형",            "title": "유리함수의 정의역, 치역, 점근선 찾기",
             "observation_points": "분모 0, 근호 안 조건, 점근선처럼 그래프 전에 확인해야 할 조건을 챙기는지 본다.",
             "statement": "함수 h(x)=2/(x-1)+3의 정의역, 치역, 점근선을 구하고, 이 그래프가 y=2/x의 그래프에서 어떻게 이동한 것인지 설명하시오.",
             "correct_answer": "정의역 x≠1, 치역 y≠3, 점근선 x=1, y=3, x축 방향 +1, y축 방향 +3",
@@ -1698,9 +1583,8 @@ def load_initial_problems():
             "score": 100,
         },
         {
-            "id": "Q10", "unit": "역함수", "type": "서술형",
-            "title": "잘못된 풀이의 오류 설명 및 수정하기",
-            "observation_points": "정의역 제한을 언급하면 좋은 신호다. 단순히 '틀렸다'만 쓰면 H10으로 본다.",
+            "id": "Q10", "unit": "역함수", "type": "서술형",            "title": "잘못된 풀이의 오류 설명 및 수정하기",
+            "observation_points": "정의역 제한을 언급하면 좋은 신호. 단순히 '틀렸다'만 쓰면 H10으로 본다.",
             "statement": "다음 학생 풀이를 읽고 오류를 설명한 뒤, 올바르게 수정하시오.\n\n학생 풀이: 'y=x²의 역함수는 x=y²에서 x와 y를 바꾸면 y=x²이므로 다시 y=x²이다. 또는 양변에 제곱근을 씌워 y=√x라고 해도 된다. 따라서 y=x²의 역함수는 항상 존재한다.'",
             "correct_answer": "정의역이 실수 전체인 y=x²은 일대일함수가 아니므로 역함수가 존재하지 않음. 정의역을 x≥0으로 제한해야 역함수 y=√x가 성립.",
             "required_reasoning": "y=x²의 정의역이 실수 전체이면 일대일함수가 아님을 설명한다.",
@@ -1726,7 +1610,7 @@ def load_initial_problems():
     print(f"  [초기 문제 등록] {len(initial)}개 문제 로드 완료")
 
 
-# ─── 초기 문제 로드 (모듈 로드 시 실행) ───
+# ─── 초기 문제 로드  ───
 load_initial_problems()
 load_problems_from_supabase()  # DB에 있는 문제도 병합
 
