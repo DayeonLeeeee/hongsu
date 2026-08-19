@@ -939,7 +939,6 @@ observed_errors: 이미지에서 관찰한 구체적 실수를 짧은 문장으�
             "is_correct": grading.get("is_correct", False),
             "student_final_answer": grading.get("student_final_answer", ""),
             "steps": grading.get("steps", []),
-            "continuation_hint": grading.get("continuation_hint", ""),
             "rubric_scores": rubric_scores,
             "total_score": total_score,
             "features": features,
