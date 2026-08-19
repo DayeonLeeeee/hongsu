@@ -6,7 +6,7 @@
                     → 13차원 특성 벡터 + observed_errors
                     → 코드로 유클리드 거리 → 최근접 H코드
   4. 개인화 피드백: Claude Haiku (tool_use)
-  5. 해설 (마스터): Claude Opus 4.6 (vision + tool_use)
+  5. 모범답안
 
 """
 
