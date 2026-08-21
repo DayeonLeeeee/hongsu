@@ -7,7 +7,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#5B5FEF">
 <link rel="manifest" href="/manifest.json">
-<title>홍수</title>
+<title>Hongik수학</title>
 <style>
 :root{--pri:#5B5FEF;--prid:#4245C9;--pris:#EEEEFD;--bg:#F6F6FC;--card:#fff;--bdr:#E9E9F5;--tx:#20212E;--sub:#767893;--ok:#17A673;--oks:#E7F8F1;--err:#E6493C;--errs:#FDEBEA;--warn:#F0A93C}
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -49,15 +49,15 @@ body{font-family:'Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif;back
 .dist-bar-bg{flex:1;height:16px;background:var(--bg);border-radius:4px;overflow:hidden}
 .dist-bar{height:100%;border-radius:4px}
 .feedback-card{background:var(--pris);border-radius:14px;padding:14px}
-.camera-wrap{position:fixed;inset:0;background:#000;z-index:100;display:none;flex-direction:column}
-.camera-wrap.active{display:flex}
-video{width:100%;flex:1;object-fit:cover}
-canvas{display:none}
-.cam-top{position:absolute;top:0;left:0;right:0;padding:16px 20px;padding-top:max(16px,env(safe-area-inset-top));display:flex;justify-content:space-between;z-index:10}
-.cam-btn{width:36px;height:36px;border-radius:18px;background:rgba(42,42,42,.8);border:none;color:#fff;font-size:16px;cursor:pointer}
-.cam-dock{position:absolute;bottom:0;left:0;right:0;padding:20px 36px;padding-bottom:max(20px,env(safe-area-inset-bottom));display:flex;align-items:center;justify-content:center;z-index:10}
-.shutter{width:76px;height:76px;border-radius:38px;background:rgba(255,255,255,.15);padding:5px;border:3px solid #fff;cursor:pointer}
-.shutter-inner{width:100%;height:100%;border-radius:50%;background:#fff}
+.canvas-preview{background:#fff;border:2px dashed var(--bdr);border-radius:12px;min-height:180px;display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;margin-bottom:10px;position:relative}
+.canvas-preview img{width:100%;display:block}
+.canvas-preview .placeholder{color:var(--sub);font-size:14px;font-weight:600}
+.canvas-full{position:fixed;inset:0;background:#fff;z-index:100;display:none;flex-direction:column}
+.canvas-full.active{display:flex}
+.canvas-toolbar{display:flex;gap:6px;padding:10px 16px;padding-top:max(10px,env(safe-area-inset-top));background:#f5f5f5;border-bottom:1px solid var(--bdr);align-items:center;z-index:10}
+.canvas-toolbar .tb{height:36px;border-radius:10px;border:1px solid var(--bdr);background:#fff;font-size:13px;font-weight:700;padding:0 12px;cursor:pointer;display:flex;align-items:center;gap:4px}
+.canvas-toolbar .tb.active{background:var(--pri);color:#fff;border-color:var(--pri)}
+.draw-area{flex:1;overflow:hidden;touch-action:none;cursor:crosshair}
 .loading{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:60px 20px}
 .spinner{width:32px;height:32px;border:3px solid var(--bdr);border-top-color:var(--pri);border-radius:50%;animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -112,25 +112,30 @@ canvas{display:none}
   <div class="scroll">
     <div class="title" id="detail-title" style="margin-bottom:12px"></div>
     <div class="card" id="detail-stmt" style="font-size:15px;line-height:1.7"></div>
+    <div style="font-size:13px;font-weight:800;margin:16px 0 8px">풀이 작성</div>
+    <div class="canvas-preview" id="canvas-preview" onclick="openCanvas()">
+      <span class="placeholder">여기를 눌러 풀이를 작성하세요 ✏️</span>
+    </div>
   </div>
   <div class="bottom">
-    <button class="btn btn-pri" onclick="openCamera()">📷 풀이 촬영하기</button>
+    <button class="btn btn-sec" onclick="openCanvas()">✏️ 풀이 작성</button>
+    <button class="btn btn-pri" id="btn-submit" onclick="submitCanvas()" disabled>제출하기 →</button>
   </div>
 </div>
 
-<!-- ══════ 카메라 ══════ -->
-<div id="s-camera" class="camera-wrap">
-  <video id="cam-video" autoplay playsinline></video>
-  <canvas id="cam-canvas"></canvas>
-  <div class="cam-top">
-    <button class="cam-btn" onclick="closeCamera()">✕</button>
-    <div style="background:rgba(42,42,42,.8);padding:8px 14px;border-radius:100px;color:#fff;font-size:13px;font-weight:600">풀이를 프레임에 맞춰주세요</div>
-    <div style="width:36px"></div>
+<!-- ══════ 전체화면 캔버스 ══════ -->
+<div id="s-canvas" class="canvas-full">
+  <div class="canvas-toolbar">
+    <button class="tb" onclick="closeCanvas()">✕ 완료</button>
+    <div style="flex:1"></div>
+    <button class="tb" id="tb-pen" onclick="setTool('pen')">✏️ 펜</button>
+    <button class="tb" id="tb-eraser" onclick="setTool('eraser')">🧹 지우개</button>
+    <button class="tb" onclick="undoStroke()">↩ 되돌리기</button>
+    <button class="tb" onclick="clearCanvas()">🗑 전체 지우기</button>
   </div>
-  <div class="cam-dock">
-    <div class="shutter" onclick="capturePhoto()"><div class="shutter-inner"></div></div>
+  <div class="draw-area">
+    <canvas id="draw-canvas"></canvas>
   </div>
-  <input type="file" id="file-input" accept="image/*" capture="camera" style="display:none" onchange="handleFileSelect(event)">
 </div>
 
 <!-- ══════ OCR 확인 ══════ -->
@@ -180,7 +185,7 @@ canvas{display:none}
     <button class="back" onclick="go('grading')">‹ 뒤로</button>
     <div class="title">마스터 해설</div>
   </div>
-  <div id="sol-loading" class="loading" style="flex:1"><div class="spinner"></div><div style="font-size:18px;font-weight:700">해설 생성 중...</div></div>
+  <div id="sol-loading" class="loading" style="flex:1"><div class="spinner"></div><div style="font-size:18px;font-weight:700">해설 로드 중...</div></div>
   <div id="sol-content" class="scroll" style="display:none"></div>
   <div class="bottom">
     <button class="btn btn-dark" onclick="go('home')">홈으로 돌아가기</button>
@@ -277,59 +282,184 @@ function loadDetail() {
   state.ocrSteps = [];
   state.ocrText = '';
   state.photoB64 = null;
+  strokes = [];
+  if (drawCtx) clearCanvasPixels();
+  setTimeout(() => updatePreview(), 0);
 }
 
-// ─── 카메라 ───
-let camStream = null;
+// ─── 캔버스 (S Pen 필기) ───
+let drawCtx = null;
+let strokes = [];       // [{points, tool, color, width}]
+let currentStroke = null;
+let currentTool = 'pen'; // 'pen' | 'eraser'
+let isDrawing = false;
+const CANVAS_W = 1600;
+const CANVAS_H = 2400;
 
-function openCamera() {
-  // 모바일은 파일 선택이 더 안정적
-  if (/Android|iPhone|iPad/i.test(navigator.userAgent)) {
-    document.getElementById('file-input').click();
-    return;
-  }
-  // PC는 getUserMedia
-  const wrap = document.getElementById('s-camera');
+function initCanvas() {
+  const c = document.getElementById('draw-canvas');
+  c.width = CANVAS_W;
+  c.height = CANVAS_H;
+  drawCtx = c.getContext('2d');
+  clearCanvasPixels();
+
+  c.addEventListener('pointerdown', onPointerDown, { passive: false });
+  c.addEventListener('pointermove', onPointerMove, { passive: false });
+  c.addEventListener('pointerup', onPointerUp);
+  c.addEventListener('pointerleave', onPointerUp);
+}
+
+function clearCanvasPixels() {
+  drawCtx.fillStyle = '#fff';
+  drawCtx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+}
+
+function openCanvas() {
+  const wrap = document.getElementById('s-canvas');
   wrap.classList.add('active');
-  navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280 } } })
-    .then(stream => { camStream = stream; document.getElementById('cam-video').srcObject = stream; })
-    .catch(e => { alert('카메라를 열 수 없습니다: ' + e.message); closeCamera(); });
+  if (!drawCtx) initCanvas();
+  fitCanvas();
+  setTool(currentTool);
 }
 
-function closeCamera() {
-  if (camStream) { camStream.getTracks().forEach(t => t.stop()); camStream = null; }
-  document.getElementById('s-camera').classList.remove('active');
+function closeCanvas() {
+  document.getElementById('s-canvas').classList.remove('active');
+  updatePreview();
 }
 
-function capturePhoto() {
-  const video = document.getElementById('cam-video');
-  const canvas = document.getElementById('cam-canvas');
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
-  canvas.getContext('2d').drawImage(video, 0, 0);
-  canvas.toBlob(blob => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      state.photoB64 = reader.result.split(',')[1];
-      closeCamera();
-      go('ocr');
-      doOcr();
-    };
-    reader.readAsDataURL(blob);
-  }, 'image/jpeg', 0.85);
+function fitCanvas() {
+  const c = document.getElementById('draw-canvas');
+  const area = c.parentElement;
+  c.style.width = area.clientWidth + 'px';
+  c.style.height = area.clientHeight + 'px';
 }
 
-function handleFileSelect(event) {
-  const file = event.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = () => {
-    state.photoB64 = reader.result.split(',')[1];
-    go('ocr');
-    doOcr();
+function setTool(tool) {
+  currentTool = tool;
+  document.getElementById('tb-pen').classList.toggle('active', tool === 'pen');
+  document.getElementById('tb-eraser').classList.toggle('active', tool === 'eraser');
+  document.getElementById('draw-canvas').style.cursor = tool === 'eraser' ? 'cell' : 'crosshair';
+}
+
+function getCanvasPos(e) {
+  const c = document.getElementById('draw-canvas');
+  const rect = c.getBoundingClientRect();
+  return {
+    x: (e.clientX - rect.left) / rect.width * CANVAS_W,
+    y: (e.clientY - rect.top) / rect.height * CANVAS_H,
+    pressure: e.pressure || 0.5,
   };
-  reader.readAsDataURL(file);
-  event.target.value = '';
+}
+
+function onPointerDown(e) {
+  // S Pen 환경에서 터치 무시 (펜만 허용), 펜이 없는 환경에서는 터치도 허용
+  if (e.pointerType === 'touch' && hasSPen()) return;
+  e.preventDefault();
+  isDrawing = true;
+  const pos = getCanvasPos(e);
+  const width = currentTool === 'eraser' ? 40 : Math.max(2, 6 * pos.pressure);
+  currentStroke = { points: [pos], tool: currentTool, width };
+  drawCtx.beginPath();
+  drawCtx.moveTo(pos.x, pos.y);
+  if (currentTool === 'eraser') {
+    drawCtx.globalCompositeOperation = 'destination-out';
+  } else {
+    drawCtx.globalCompositeOperation = 'source-over';
+    drawCtx.strokeStyle = '#111';
+  }
+  drawCtx.lineCap = 'round';
+  drawCtx.lineJoin = 'round';
+  drawCtx.lineWidth = width;
+}
+
+function onPointerMove(e) {
+  if (!isDrawing) return;
+  if (e.pointerType === 'touch' && hasSPen()) return;
+  e.preventDefault();
+  const pos = getCanvasPos(e);
+  currentStroke.points.push(pos);
+  if (currentTool === 'pen') {
+    drawCtx.lineWidth = Math.max(2, 6 * pos.pressure);
+  }
+  drawCtx.lineTo(pos.x, pos.y);
+  drawCtx.stroke();
+  drawCtx.beginPath();
+  drawCtx.moveTo(pos.x, pos.y);
+}
+
+function onPointerUp(e) {
+  if (!isDrawing) return;
+  isDrawing = false;
+  drawCtx.globalCompositeOperation = 'source-over';
+  if (currentStroke && currentStroke.points.length > 0) {
+    strokes.push(currentStroke);
+  }
+  currentStroke = null;
+}
+
+function hasSPen() {
+  // S Pen이 감지된 적 있으면 true (터치 무시)
+  return window._spenDetected || false;
+}
+
+// S Pen 감지: pen 이벤트가 한 번이라도 오면 이후 터치 무시
+document.addEventListener('pointerdown', e => {
+  if (e.pointerType === 'pen') window._spenDetected = true;
+}, { capture: true });
+
+function undoStroke() {
+  if (strokes.length === 0) return;
+  strokes.pop();
+  redrawAll();
+}
+
+function clearCanvas() {
+  if (strokes.length === 0) return;
+  if (!confirm('전체 지울까요?')) return;
+  strokes = [];
+  clearCanvasPixels();
+}
+
+function redrawAll() {
+  clearCanvasPixels();
+  strokes.forEach(s => {
+    drawCtx.beginPath();
+    drawCtx.lineCap = 'round';
+    drawCtx.lineJoin = 'round';
+    drawCtx.lineWidth = s.width;
+    if (s.tool === 'eraser') {
+      drawCtx.globalCompositeOperation = 'destination-out';
+    } else {
+      drawCtx.globalCompositeOperation = 'source-over';
+      drawCtx.strokeStyle = '#111';
+    }
+    s.points.forEach((p, i) => {
+      if (i === 0) { drawCtx.moveTo(p.x, p.y); }
+      else { drawCtx.lineTo(p.x, p.y); drawCtx.stroke(); drawCtx.beginPath(); drawCtx.moveTo(p.x, p.y); }
+    });
+  });
+  drawCtx.globalCompositeOperation = 'source-over';
+}
+
+function updatePreview() {
+  const preview = document.getElementById('canvas-preview');
+  const btn = document.getElementById('btn-submit');
+  if (strokes.length === 0) {
+    preview.innerHTML = '<span class="placeholder">여기를 눌러 풀이를 작성하세요 ✏️</span>';
+    btn.disabled = true;
+  } else {
+    const c = document.getElementById('draw-canvas');
+    preview.innerHTML = `<img src="${c.toDataURL('image/png')}" alt="풀이 미리보기">`;
+    btn.disabled = false;
+  }
+}
+
+function submitCanvas() {
+  if (strokes.length === 0) return;
+  const c = document.getElementById('draw-canvas');
+  state.photoB64 = c.toDataURL('image/jpeg', 0.9).split(',')[1];
+  go('ocr');
+  doOcr();
 }
 
 // ─── OCR ───
@@ -414,7 +544,6 @@ async function startGrading() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        problem_image_b64: state.photoB64,
         solution_image_b64: state.photoB64,
         problem_text: state.current?.statement || '',
         problem_id: state.current?.id || '',
@@ -543,7 +672,10 @@ function retryProblem() {
   state.photoB64 = null;
   state.ocrSteps = [];
   state.ocrText = '';
-  openCamera();
+  strokes = [];
+  if (drawCtx) clearCanvasPixels();
+  updatePreview();
+  openCanvas();
 }
 
 // ─── 마스터 해설 ───
@@ -556,46 +688,25 @@ async function showSolution() {
     const resp = await fetch(API + '/master_solution', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image: state.photoB64, mime_type: 'image/jpeg', problem_text: state.current?.statement || '' }),
+      body: JSON.stringify({ problem_id: state.current?.id || '', problem_text: state.current?.statement || '' }),
     });
     const d = await resp.json();
 
     let html = '';
-    // 문제
     html += `<div class="card"><div style="font-size:10px;font-weight:800;color:var(--sub);letter-spacing:1px;margin-bottom:6px">PROBLEM</div><div style="font-size:14px;line-height:1.7">${state.current?.statement||''}</div></div>`;
-
-    // 메타
     html += `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
-      <span class="chip chip-d">풀이: ${d.method_type||''}</span>
-      <span class="chip" style="background:var(--oks);color:var(--ok)">정답 · ${d.answer||''}</span>
+      <span class="chip" style="background:var(--oks);color:var(--ok)">정답 · ${d.correct_answer||''}</span>
     </div>`;
-
-    // 단계
-    if (d.steps) {
-      d.steps.forEach(s => {
-        html += `<div class="sol-step">
-          <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-            <div class="sol-num">${s.step}</div>
-            <div style="font-size:14px;font-weight:800">${s.title}</div>
-          </div>
-          <div style="font-size:13px;line-height:1.6;color:var(--sub)">${s.content}</div>
-          ${s.formula ? `<div class="sol-formula">${s.formula}</div>` : ''}
-        </div>`;
-      });
-    }
-
-    // 정답
-    html += `<div style="background:var(--oks);border-radius:14px;padding:16px;text-align:center">
-      <div style="font-size:14px">✅</div>
-      <div style="font-size:13px;font-weight:700;color:var(--ok)">모든 단계를 확인했어요</div>
-      <div style="font-size:16px;font-weight:800;color:var(--ok)">정답: ${d.answer||''}</div>
+    html += `<div class="card" style="font-size:14px;line-height:1.8;white-space:pre-wrap">${d.model_answer||''}</div>`;
+    html += `<div style="background:var(--oks);border-radius:14px;padding:16px;text-align:center;margin-top:12px">
+      <div style="font-size:13px;font-weight:700;color:var(--ok)">✅ 모범답안 확인 완료</div>
     </div>`;
 
     document.getElementById('sol-content').innerHTML = html;
     document.getElementById('sol-loading').style.display = 'none';
     document.getElementById('sol-content').style.display = 'block';
   } catch(e) {
-    document.getElementById('sol-loading').innerHTML = `<div style="font-size:40px">⚠️</div><div>해설 생성 실패: ${e.message}</div>`;
+    document.getElementById('sol-loading').innerHTML = `<div style="font-size:40px">⚠️</div><div>해설 로드 실패: ${e.message}</div>`;
   }
 }
 
