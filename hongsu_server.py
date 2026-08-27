@@ -920,11 +920,11 @@ observed_errors: 이미지에서 관찰한 구체적 실수를 짧은 문장으�
         if is_correct and not has_wrong:
             # 정답 풀이 → H코드 "해당 없음"
             classification = {
-                "primary_h": None, "primary_label": "해당 없음",
-                "primary_distance": None, "secondary_h": None,
-                "secondary_label": None, "secondary_distance": None,
-                "gap": None, "is_typical": False,
-                "distribution": {}, "all_distances": {},
+                "primary_h": None,
+                "secondary_h": None,
+                "no_error": True,
+                "errors": [],
+                "method": "direct",
             }
             feedback = {"feedback": "", "detailed_feedback": "", "next_focus": []}
             print(f"  [분류] 정답 — H코드 해당 없음")
