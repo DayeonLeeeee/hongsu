@@ -826,68 +826,6 @@ def grade_endpoint():
 - evidence: 학생 풀이에서 해당 부분 직접 인용 (없으면 빈 문자열).
 total_score: 모든 루브릭 points의 합산.
 
-[특성 벡터 — 3단계 앵커 기준]
-학생 풀이 이미지에서 관찰된 실제 근거로만 판단하세요. 각 값 0.0~1.0.
-
-A. 개념·조건 축 (1.0=확실히 확인, 0.0=전혀 안 함)
-- checked_uniqueness:
-  0.0 = 유일성 개념을 전혀 언급/확인하지 않음
-  0.5 = 관련 없는 문제이거나, 언급은 했으나 적용이 불완전
-  1.0 = 각 입력에 출력이 하나인지 명시적으로 확인함
-- checked_definition_domain:
-  0.0 = 정의역/공역/치역을 전혀 구분하지 않음
-  0.5 = 관련 없는 문제이거나, 용어는 쓰나 혼동이 보임
-  1.0 = 세 개념을 정확히 구분하여 사용
-- checked_one_to_one:
-  0.0 = 일대일 여부를 전혀 확인하지 않음
-  0.5 = 관련 없는 문제이거나, 시도했으나 불완전
-  1.0 = 서로 다른 입력→서로 다른 출력을 명시적으로 확인
-- checked_composition_order:
-  0.0 = 합성 순서를 완전히 뒤바꿈
-  0.5 = 관련 없는 문제이거나, 순서 인식이 모호
-  1.0 = 안쪽 함수 먼저 적용을 명확히 보여줌
-- checked_domain_restriction:
-  0.0 = 분모=0이나 근호<0 조건을 전혀 확인 안 함
-  0.5 = 관련 없는 문제이거나, 부분적으로만 확인
-  1.0 = 정의역 제한 조건을 완전히 확인
-
-B. 오류 심각도 축 (1.0=심각한 오류, 0.0=오류 없음)
-- arithmetic_error:
-  0.0 = 산술 계산 완벽
-  0.3 = 사소한 계산 실수 1개 (결론에 영향 없음)
-  0.7 = 계산 실수가 결론을 바꿈
-  1.0 = 여러 곳에서 심각한 계산 오류
-- wrong_formula_applied:
-  0.0 = 올바른 공식/정의 사용
-  0.5 = 공식을 일부 잘못 적용
-  1.0 = 완전히 다른 공식/정의를 사용
-- notation_confusion:
-  0.0 = 표기가 정확하고 일관적
-  0.5 = 표기가 비표준이지만 의미는 통함
-  1.0 = 표기 혼동이 풀이 논리를 왜곡
-- graph_interpretation_error:
-  0.0 = 그래프 관련 없거나, 해석 정확
-  0.5 = 그래프 해석에 부분적 오류
-  1.0 = 그래프를 완전히 잘못 해석
-
-C. 서술·근거 축 (1.0=충분, 0.0=부재)
-- has_reasoning:
-  0.0 = 답만 쓰고 과정 없음
-  0.5 = 일부 과정은 있으나 핵심 근거 누락
-  1.0 = 단계별 근거가 명확히 서술됨
-- used_criterion:
-  0.0 = 판정 기준을 전혀 명시하지 않음
-  0.5 = 기준을 암시적으로만 사용
-  1.0 = "~이므로", "~조건에 의해" 등 명시적 기준 제시
-- gave_counterexample:
-  0.0 = 반례/구체 예시 없음
-  0.5 = 예시를 들었으나 불완전
-  1.0 = 적절한 반례/예시로 주장을 뒷받침
-- final_answer_correct:
-  0.0 = 최종 답 완전히 오답
-  0.5 = 부분 정답 (일부만 맞음)
-  1.0 = 최종 답 정답
-
 observed_errors: 이미지에서 관찰한 구체적 실수를 짧은 문장으로 나열.
 
 반드시 grade_student_solution tool로만 응답하세요."""
@@ -912,8 +850,6 @@ observed_errors: 이미지에서 관찰한 구체적 실수를 짧은 문장으�
         )
         grading = parse_tool_use(response)
 
-        # 특성 벡터 → 최근접 H코드 (오답일 때만)
-        features = grading.get("features", {})
         is_correct = grading.get("is_correct", False)
         has_wrong = any(s.get("status") == "wrong" for s in grading.get("steps", []))
 
@@ -963,7 +899,6 @@ observed_errors: 이미지에서 관찰한 구체적 실수를 짧은 문장으�
             "steps": grading.get("steps", []),
             "rubric_scores": rubric_scores,
             "total_score": total_score,
-            "features": features,
             "observed_errors": grading.get("observed_errors", []),
             "classification": classification,
             "feedback": feedback,
