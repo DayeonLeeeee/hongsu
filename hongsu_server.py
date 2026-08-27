@@ -3,8 +3,8 @@
   1. 풀이 OCR:     Mathpix + Gemini Flash 병렬 → 단계별 평문 (표시용)
   2. 자연어 수정:  Claude Haiku (vision + tool_use)
   3. 채점:         Claude Opus 4.6 (vision + tool_use)
-                    → 13차원 특성 벡터 + observed_errors
-
+                    → observed_errors
+                    → 코드로 유클리드 거리 → 최근접 H코드
   4. 개인화 피드백: Claude Haiku (tool_use)
   5. 모범답안
 
@@ -301,7 +301,9 @@ RECOMMENDED_FLOW = {
 }
 
 
+# ═══════════════════════════════════════════════════════
 # 단원별 관련 H코드
+# ═══════════════════════════════════════════════════════
 UNIT_H_RELEVANCE = {
     "함수":     ["H1", "H2", "H3", "H10"],
     "역함수":   ["H4", "H6", "H7", "H8", "H10"],
@@ -311,11 +313,11 @@ UNIT_H_RELEVANCE = {
 }
 
 
-
+# ═══════════════════════════════════════════════════════
 # H코드 직접 분류기 (LLM 기반 — 현재 메인 분류 방식)
 # 향후 교사 라벨 수집 후 classify_logistic.py(로지스틱 회귀),
 # classify_dina.py(DINA)로 대체/병행 예정.
-
+# ═══════════════════════════════════════════════════════
 H_CRITERIA = {
     "H1": {
         "name": "함수 정의 오류",
@@ -486,10 +488,10 @@ TOOL_REFINE_TEXT = {
     },
 }
 
-# ─── (3) 채점 (특성 벡터 추출) ────
+# ─── (2) 채점 ────
 TOOL_GRADE_SOLUTION = {
     "name": "grade_student_solution",
-    "description": "학생 풀이를 채점합니다: 13차원 특성 벡터 + 루브릭별 부분점수 + 단계별 판정.",
+    "description": "학생 풀이를 채점합니다: 루브릭별 부분점수 + 단계별 판정.",
     "input_schema": {
         "type": "object",
         "properties": {
@@ -527,32 +529,6 @@ TOOL_GRADE_SOLUTION = {
                 "type": "integer",
                 "description": "루브릭 점수 합산 (전체 배점 중 몇 점)",
             },
-            "features": {
-                "type": "object",
-                "properties": {
-                    "checked_uniqueness": {"type": "number"},
-                    "checked_definition_domain": {"type": "number"},
-                    "checked_one_to_one": {"type": "number"},
-                    "checked_composition_order": {"type": "number"},
-                    "checked_domain_restriction": {"type": "number"},
-                    "arithmetic_error": {"type": "number"},
-                    "wrong_formula_applied": {"type": "number"},
-                    "notation_confusion": {"type": "number"},
-                    "graph_interpretation_error": {"type": "number"},
-                    "has_reasoning": {"type": "number"},
-                    "used_criterion": {"type": "number"},
-                    "gave_counterexample": {"type": "number"},
-                    "final_answer_correct": {"type": "number"},
-                },
-                "required": [
-                    "checked_uniqueness", "checked_definition_domain", "checked_one_to_one",
-                    "checked_composition_order", "checked_domain_restriction",
-                    "arithmetic_error", "wrong_formula_applied", "notation_confusion",
-                    "graph_interpretation_error", "has_reasoning", "used_criterion",
-                    "gave_counterexample", "final_answer_correct",
-                ],
-                "description": "13차원 오류 특성 벡터. 각 값 0.0~1.0.",
-            },
             "observed_errors": {
                 "type": "array",
                 "items": {"type": "string"},
@@ -563,7 +539,7 @@ TOOL_GRADE_SOLUTION = {
         "required": [
             "is_correct", "student_final_answer", "steps",
             "rubric_scores", "total_score",
-            "features", "observed_errors",
+            "observed_errors",
         ],
     },
 }
@@ -630,6 +606,7 @@ def ocr_endpoint():
                 "mode": "solution",
                 "steps": steps,
                 "mathpix_raw": mathpix_result,
+                "confidence": 0.9 if steps else 0.3,
                 "timestamp": now_iso(),
             })
         else:
@@ -710,13 +687,13 @@ def refine_endpoint():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
-# 엔드포인트 4: 채점 (특성 벡터 + 최근접 분류)
+# 엔드포인트 3: 채점
 @app.route("/grade", methods=["POST"])
 def grade_endpoint():
     """
     Claude Opus vision — 학생 풀이 이미지를 보고 채점.
     문제 정보는 DB에서 텍스트로 전체 조회.
-    → 13차원 특성 벡터 뽑음
+    → 코드로 최근접 H코드 결정
     → Claude Haiku로 개인화 피드백 생성
 
     입력:
@@ -825,7 +802,7 @@ def grade_endpoint():
 - evidence: 학생 풀이에서 해당 부분 직접 인용 (없으면 빈 문자열).
 total_score: 모든 루브릭 points의 합산.
 
-observed_errors: 이미지에서 관찰한 구체적 실수를 짧은 문장으로 나열.
+observed_errors: 관찰한 구체적 실수를 짧은 문장으로 나열.
 
 반드시 grade_student_solution tool로만 응답하세요."""
 
@@ -844,6 +821,7 @@ observed_errors: 이미지에서 관찰한 구체적 실수를 짧은 문장으�
             temperature=0.0,
             tools=[TOOL_GRADE_SOLUTION],
             tool_choice={"type": "tool", "name": "grade_student_solution"},
+            system="수학 채점 전문가. 학생 풀이를 정확히 채점합니다.",
             messages=[{"role": "user", "content": user_content}],
         )
         grading = parse_tool_use(response)
@@ -854,11 +832,8 @@ observed_errors: 이미지에서 관찰한 구체적 실수를 짧은 문장으�
         if is_correct and not has_wrong:
             # 정답 풀이 → H코드 "해당 없음"
             classification = {
-                "primary_h": None,
-                "secondary_h": None,
-                "no_error": True,
-                "errors": [],
-                "method": "direct",
+                "primary_h": None, "secondary_h": None,
+                "no_error": True, "errors": [], "method": "direct",
             }
             feedback = {"feedback": "", "detailed_feedback": "", "next_focus": []}
             print(f"  [분류] 정답 — H코드 해당 없음")
@@ -907,9 +882,8 @@ observed_errors: 이미지에서 관찰한 구체적 실수를 짧은 문장으�
         }
 
         print(f"  [채점 완료] correct={result['is_correct']}, "
-              f"primary={classification.get('primary_h')}, "
-              f"secondary={classification.get('secondary_h')}, "
-              f"total={total_score}")
+              f"primary={classification['primary_h']} ({classification['primary_label']}), "
+              f"total={total_score}, gap={classification['gap']}")
         return jsonify(result)
 
     except Exception as e:
@@ -1071,26 +1045,33 @@ def manifest():
 def measure_consistency_endpoint():
     """
     같은 입력으로 채점을 여러 번 실행해서 재현 일관성을 측정.
+    연구 목적 (Cohen's k, 벡터 안정성 등).
+
     입력:
-      solution_image_b64: 학생 풀이 이미지 (이미지 또는 텍스트 중 하나)
-      solution_text: 학생 풀이 텍스트 (합성답안 실험용)
+      solution_image_b64: 학생 풀이 이미지
       problem_id: DB 문제 ID
       n_runs: 반복 횟수 (기본 3, 최대 5)
     """
     try:
         data = request.get_json()
         n_runs = min(int(data.get("n_runs", 3)), 5)
+
         runs = []
         for i in range(n_runs):
             print(f"\n[일관성 측정 {i+1}/{n_runs}]")
+            # 채점 호출 (내부적으로 grade_endpoint 로직 재사용)
+            # 여기서는 간단히 요청을 다시 보냄
             with app.test_client() as c:
                 resp = c.post("/grade", json=data)
                 runs.append(resp.get_json())
 
+        # 통계 계산
         primaries = [r["classification"]["primary_h"] for r in runs if r.get("success")]
         from collections import Counter
         counter = Counter(primaries)
         most_common, count = counter.most_common(1)[0] if counter else ("N/A", 0)
+
+
 
         return jsonify({
             "success": True,
@@ -1100,9 +1081,11 @@ def measure_consistency_endpoint():
             "runs": runs,
             "timestamp": now_iso(),
         })
+
     except Exception as e:
         print(f"  [일관성 측정 에러] {traceback.format_exc()}")
         return jsonify({"success": False, "error": str(e)}), 500
+
 
 # ═══════════════════════════════════════════════════════
 # 관리 API: 문제 & 채점 가이드라인 CRUD
