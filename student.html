@@ -119,8 +119,10 @@ body{font-family:'Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif;back
   </div>
   <div class="bottom">
     <button class="btn btn-sec" onclick="openCanvas()">✏️ 풀이 작성</button>
+    <button class="btn btn-sec" onclick="document.getElementById('file-fallback').click()" style="flex:0.6">📷</button>
     <button class="btn btn-pri" id="btn-submit" onclick="submitCanvas()" disabled>제출하기 →</button>
   </div>
+  <input type="file" id="file-fallback" accept="image/*" capture="camera" style="display:none" onchange="handleFileFallback(event)">
 </div>
 
 <!-- ══════ 전체화면 캔버스 ══════ -->
@@ -312,6 +314,17 @@ function initCanvas() {
 function clearCanvasPixels() {
   drawCtx.fillStyle = '#fff';
   drawCtx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+  drawCtx.fillStyle = '#ddd';
+  drawCtx.font = '32px sans-serif';
+  drawCtx.fillText(state.current?.title || '', 40, 60);
+  drawCtx.strokeStyle = '#f0f0f0';
+  drawCtx.lineWidth = 1;
+  for (let y = 120; y < CANVAS_H; y += 60) {
+    drawCtx.beginPath();
+    drawCtx.moveTo(40, y);
+    drawCtx.lineTo(CANVAS_W - 40, y);
+    drawCtx.stroke();
+  }
 }
 
 function openCanvas() {
@@ -462,6 +475,22 @@ function submitCanvas() {
   doOcr();
 }
 
+function handleFileFallback(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    state.photoB64 = reader.result.split(',')[1];
+    document.getElementById('btn-submit').disabled = false;
+    document.getElementById('canvas-preview').innerHTML =
+      `<img src="${reader.result}" alt="업로드된 풀이">`;
+    go('ocr');
+    doOcr();
+  };
+  reader.readAsDataURL(file);
+  event.target.value = '';
+}
+
 // ─── OCR ───
 async function doOcr() {
   document.getElementById('ocr-loading').style.display = 'flex';
@@ -598,9 +627,9 @@ function renderGradeResult(d) {
     <div style="display:flex;align-items:center;gap:10px">
       <span style="font-size:28px;font-weight:900;color:var(--err)">오답</span>
       ${d.total_score != null ? `<span style="font-size:20px;font-weight:800;color:var(--tx)">${d.total_score}점</span>` : ''}
-      ${cls.primary_h ? `<span class="chip chip-h" style="background:${HCOLORS[cls.primary_h]||'#E6493C'}1a;color:${HCOLORS[cls.primary_h]||'#E6493C'}">${cls.primary_h} · ${cls.primary_label||''}</span>` : ''}
+      ${cls.primary_h ? `<span class="chip chip-h" style="background:${HCOLORS[cls.primary_h]||'#E6493C'}1a;color:${HCOLORS[cls.primary_h]||'#E6493C'}">${cls.primary_h}</span>` : ''}
     </div>
-    ${cls.secondary_h ? `<div style="font-size:11px;color:var(--sub);margin-top:6px">2순위: ${cls.secondary_h} · ${cls.secondary_label||''} (격차 ${cls.gap||''})</div>` : ''}
+    ${cls.secondary_h ? `<div style="font-size:11px;color:var(--sub);margin-top:6px">보조: ${cls.secondary_h}</div>` : ''}
   </div>`;
 
   // 루브릭별 점수
@@ -653,11 +682,17 @@ function renderGradeResult(d) {
     html += '</div>';
   }
 
-  // 분포
-  if (cls.distribution) {
-    html += '<div style="font-size:13px;font-weight:800;margin:12px 0 8px">오답 유형 유사도</div><div class="card">';
-    Object.entries(cls.distribution).sort((a,b)=>b[1]-a[1]).slice(0,5).forEach(([h,pct]) => {
-      html += `<div class="dist-row"><div style="width:30px;font-size:11px;font-weight:800">${h}</div><div class="dist-bar-bg"><div class="dist-bar" style="width:${Math.round(pct*100)}%;background:${HCOLORS[h]||'#5B5FEF'}"></div></div><div style="width:32px;font-size:11px;font-weight:700;color:var(--sub);text-align:right">${Math.round(pct*100)}%</div></div>`;
+  // 라인별 오류 분류
+  if (cls.errors?.length) {
+    html += '<div style="font-size:13px;font-weight:800;margin:12px 0 8px">오류 유형 분류</div><div class="card">';
+    cls.errors.forEach((e, idx) => {
+      html += `<div style="padding:8px 0;${idx>0?'border-top:1px solid var(--bdr);':''}">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+          <span class="chip chip-h" style="background:${HCOLORS[e.h_code]||'#E6493C'}1a;color:${HCOLORS[e.h_code]||'#E6493C'}">Step ${e.step_index} → ${e.h_code}</span>
+        </div>
+        <div style="font-size:12px;color:var(--sub)">${e.reason}</div>
+        ${e.evidence ? `<div style="font-size:11px;color:var(--pri);margin-top:2px;font-style:italic">"${e.evidence}"</div>` : ''}
+      </div>`;
     });
     html += '</div>';
   }
