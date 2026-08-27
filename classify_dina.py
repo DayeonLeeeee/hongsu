@@ -1,5 +1,7 @@
 """
-오답유형 분류 - DINA(Deterministic Input, Noisy AND gate) 방식
+오답유형 분류 - DINA(Deterministic Input, Noisy AND gate) 방식 # 최준원
+라벨 모이면 처리 시도할 것(9월)
+
 =====================================================================
 인지진단모형(CDM) 계열 중 가장 널리 쓰이는 DINA를 이 프로젝트 규모에 맞게
 단순화한 버전.
