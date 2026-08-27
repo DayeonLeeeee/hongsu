@@ -630,7 +630,6 @@ def ocr_endpoint():
                 "mode": "solution",
                 "steps": steps,
                 "mathpix_raw": mathpix_result,
-                "confidence": 0.9 if steps else 0.3,
                 "timestamp": now_iso(),
             })
         else:
