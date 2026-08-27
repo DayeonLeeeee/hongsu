@@ -4,7 +4,7 @@
   2. 자연어 수정:  Claude Haiku (vision + tool_use)
   3. 채점:         Claude Opus 4.6 (vision + tool_use)
                     → 13차원 특성 벡터 + observed_errors
-                    → 코드로 유클리드 거리 → 최근접 H코드
+
   4. 개인화 피드백: Claude Haiku (tool_use)
   5. 모범답안
 
@@ -720,7 +720,6 @@ def grade_endpoint():
     Claude Opus vision — 학생 풀이 이미지를 보고 채점.
     문제 정보는 DB에서 텍스트로 전체 조회.
     → 13차원 특성 벡터 뽑음
-    → 코드로 최근접 H코드 결정
     → Claude Haiku로 개인화 피드백 생성
 
     입력:
@@ -977,8 +976,9 @@ observed_errors: 이미지에서 관찰한 구체적 실수를 짧은 문장으�
         }
 
         print(f"  [채점 완료] correct={result['is_correct']}, "
-              f"primary={classification['primary_h']} ({classification['primary_label']}), "
-              f"total={total_score}, gap={classification['gap']}")
+              f"primary={classification.get('primary_h')}, "
+              f"secondary={classification.get('secondary_h')}, "
+              f"total={total_score}")
         return jsonify(result)
 
     except Exception as e:
