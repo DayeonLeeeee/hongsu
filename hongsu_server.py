@@ -1071,8 +1071,6 @@ def manifest():
 def measure_consistency_endpoint():
     """
     같은 입력으로 채점을 여러 번 실행해서 재현 일관성을 측정.
-    연구 목적 (Cohen's k, 벡터 안정성 등).
-
     입력:
       solution_image_b64: 학생 풀이 이미지 (이미지 또는 텍스트 중 하나)
       solution_text: 학생 풀이 텍스트 (합성답안 실험용)
@@ -1082,45 +1080,29 @@ def measure_consistency_endpoint():
     try:
         data = request.get_json()
         n_runs = min(int(data.get("n_runs", 3)), 5)
-
         runs = []
         for i in range(n_runs):
             print(f"\n[일관성 측정 {i+1}/{n_runs}]")
-            # 채점 호출 (내부적으로 grade_endpoint 로직 재사용)
-            # 여기서는 간단히 요청을 다시 보냄
             with app.test_client() as c:
                 resp = c.post("/grade", json=data)
                 runs.append(resp.get_json())
 
-        # 통계 계산
         primaries = [r["classification"]["primary_h"] for r in runs if r.get("success")]
         from collections import Counter
         counter = Counter(primaries)
         most_common, count = counter.most_common(1)[0] if counter else ("N/A", 0)
-
-        # 벡터 표준편차
-        vector_stability = {}
-        for k in FEATURE_KEYS:
-            values = [r["features"].get(k, 0.5) for r in runs if r.get("success")]
-            if len(values) >= 2:
-                vector_stability[k] = round(statistics.stdev(values), 4)
-            else:
-                vector_stability[k] = 0.0
 
         return jsonify({
             "success": True,
             "n_runs": n_runs,
             "code_consistency": round(count / n_runs, 4) if n_runs else 0,
             "primary_distribution": dict(counter),
-            "vector_stability": vector_stability,
             "runs": runs,
             "timestamp": now_iso(),
         })
-
     except Exception as e:
         print(f"  [일관성 측정 에러] {traceback.format_exc()}")
         return jsonify({"success": False, "error": str(e)}), 500
-
 
 # ═══════════════════════════════════════════════════════
 # 관리 API: 문제 & 채점 가이드라인 CRUD
