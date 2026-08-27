@@ -845,7 +845,6 @@ observed_errors: 이미지에서 관찰한 구체적 실수를 짧은 문장으�
             temperature=0.0,
             tools=[TOOL_GRADE_SOLUTION],
             tool_choice={"type": "tool", "name": "grade_student_solution"},
-            system="수학 채점 전문가. 학생 풀이의 근거에 기반해 특성 벡터를 정확히 추출합니다.",
             messages=[{"role": "user", "content": user_content}],
         )
         grading = parse_tool_use(response)
