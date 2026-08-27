@@ -4,7 +4,7 @@
   2. 자연어 수정:  Claude Haiku (vision + tool_use)
   3. 채점:         Claude Opus 4.6 (vision + tool_use)
                     → observed_errors
-                    → 코드로 유클리드 거리 → 최근접 H코드
+                    → 직접분류기 사용. 
   4. 개인화 피드백: Claude Haiku (tool_use)
   5. 모범답안
 
@@ -229,9 +229,6 @@ def normalize_plain(text: str) -> str:
 
 # 오답 유형 프로파일 (H1~H10, 문서)
 
-# 현재 수치는 오세준 교수님 문서 기반 수작업 추정치.
-# 합성 데이터(가상 학생 오답) 생성 → 반복 실험으로 프로파일 값을 지속 조정 필요
-# H코드 간 프로파일이 가까우면 분류 경계가 불분명해지므로 각 H코드가 충분히 구별되는 수치인지 합성 데이터로 확인 필요.
 FEATURE_KEYS = [
     "checked_uniqueness",          # 입력→출력 유일성
     "checked_definition_domain",   # 정의역/공역/치역 구분
@@ -301,9 +298,7 @@ RECOMMENDED_FLOW = {
 }
 
 
-# ═══════════════════════════════════════════════════════
-# 단원별 관련 H코드
-# ═══════════════════════════════════════════════════════
+# 현재로서의 단원별 관련 H코드
 UNIT_H_RELEVANCE = {
     "함수":     ["H1", "H2", "H3", "H10"],
     "역함수":   ["H4", "H6", "H7", "H8", "H10"],
@@ -313,11 +308,8 @@ UNIT_H_RELEVANCE = {
 }
 
 
-# ═══════════════════════════════════════════════════════
 # H코드 직접 분류기 (LLM 기반 — 현재 메인 분류 방식)
-# 향후 교사 라벨 수집 후 classify_logistic.py(로지스틱 회귀),
-# classify_dina.py(DINA)로 대체/병행 예정.
-# ═══════════════════════════════════════════════════════
+# 향후 교사 라벨 수집 후 classify_logistic.py(로지스틱 회귀), classify_dina.py(DINA)로 대체/병행 예정.
 H_CRITERIA = {
     "H1": {
         "name": "함수 정의 오류",
@@ -404,7 +396,7 @@ TOOL_CLASSIFY_H = {
 
 
 def classify_error_direct(grading_result: dict, problem_text: str, solution_text_or_steps: str) -> dict:
-    """LLM이 H1~H10 판정기준을 직접 보고 분류. 벡터 방식과 병행."""
+    """LLM이 H1~H10 판정기준을 직접 보고 분류."""
     try:
         steps = grading_result.get("steps", [])
         wrong_steps = [s for s in steps if s.get("status") == "wrong"]
@@ -693,7 +685,6 @@ def grade_endpoint():
     """
     Claude Opus vision — 학생 풀이 이미지를 보고 채점.
     문제 정보는 DB에서 텍스트로 전체 조회.
-    → 코드로 최근접 H코드 결정
     → Claude Haiku로 개인화 피드백 생성
 
     입력:
@@ -882,8 +873,8 @@ observed_errors: 관찰한 구체적 실수를 짧은 문장으로 나열.
         }
 
         print(f"  [채점 완료] correct={result['is_correct']}, "
-              f"primary={classification['primary_h']} ({classification['primary_label']}), "
-              f"total={total_score}, gap={classification['gap']}")
+              f"primary={classification.get('primary_h')}, "
+              f"secondary={classification.get('secondary_h')}, total={total_score}")
         return jsonify(result)
 
     except Exception as e:
@@ -1045,10 +1036,11 @@ def manifest():
 def measure_consistency_endpoint():
     """
     같은 입력으로 채점을 여러 번 실행해서 재현 일관성을 측정.
-    연구 목적 (Cohen's k, 벡터 안정성 등).
+    연구 목적 (Cohen's κ 등).
 
     입력:
-      solution_image_b64: 학생 풀이 이미지
+      solution_image_b64: 학생 풀이 이미지 (이미지 또는 텍스트 중 하나)
+      solution_text: 학생 풀이 텍스트 (합성답안 실험용)
       problem_id: DB 문제 ID
       n_runs: 반복 횟수 (기본 3, 최대 5)
     """
@@ -1066,11 +1058,11 @@ def measure_consistency_endpoint():
                 runs.append(resp.get_json())
 
         # 통계 계산
-        primaries = [r["classification"]["primary_h"] for r in runs if r.get("success")]
+        primaries = [r["classification"]["primary_h"] for r in runs 
+             if r.get("success") and r["classification"].get("primary_h")]
         from collections import Counter
         counter = Counter(primaries)
         most_common, count = counter.most_common(1)[0] if counter else ("N/A", 0)
-
 
 
         return jsonify({
@@ -1087,9 +1079,9 @@ def measure_consistency_endpoint():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
-# ═══════════════════════════════════════════════════════
+
 # 관리 API: 문제 & 채점 가이드라인 CRUD
-# ═══════════════════════════════════════════════════════
+
 
 # 인메모리 저장소 (서버 재시작하면 초기화. Supabase가 영구 저장)
 _problems_db = {}   # id -> problem dict
@@ -1134,13 +1126,9 @@ def save_to_supabase(result_data: dict):
             "student_answer": result_data.get("student_final_answer", ""),
             "graded_steps": result_data.get("steps"),
             "observed_errors": result_data.get("observed_errors"),
-            "features": result_data.get("features"),
             "primary_h": cls.get("primary_h", ""),
-            "primary_distance": cls.get("primary_distance"),
             "secondary_h": cls.get("secondary_h"),
-            "secondary_distance": cls.get("secondary_distance"),
-            "gap": cls.get("gap"),
-            "distribution": cls.get("distribution"),
+
             "feedback_text": fb.get("feedback", ""),
             "next_focus": fb.get("next_focus"),
             "total_score": result_data.get("total_score"),
@@ -1321,9 +1309,7 @@ def bulk_add_problems():
     return jsonify({"success": True, "added_ids": added, "total": len(_problems_db)})
 
 
-# ═══════════════════════════════════════════════════════
 # 학생 결과 저장/조회 API
-# ═══════════════════════════════════════════════════════
 @app.route("/results", methods=["POST"])
 def save_result():
     """채점 결과 저장"""
@@ -1337,7 +1323,6 @@ def save_result():
         "is_correct": data.get("is_correct", False),
         "student_final_answer": data.get("student_final_answer", ""),
         "error_step_index": data.get("error_step_index"),
-        "features": data.get("features", {}),
         "classification": data.get("classification", {}),
         "feedback": data.get("feedback", {}),
         "observed_errors": data.get("observed_errors", []),
@@ -1437,9 +1422,9 @@ def export_results_csv():
     }
 
 
-# ═══════════════════════════════════════════════════════
+
 # 교수님 문서 기반 문제 초기 등록 (서버 시작 시)
-# ═══════════════════════════════════════════════════════
+
 def load_initial_problems():
     """교수님 문서의 문항 1~10 초기 등록"""
     initial = [
@@ -1589,7 +1574,7 @@ if __name__ == "__main__":
     local_ip = socket.gethostbyname(hostname)
 
     print("=" * 60)
-    print("  hongsu v2 서버 (vision + tool_use + 벡터 분류)")
+    print("  hongsu v2 서버 (vision + tool_use)")
     print(f"  로컬: http://localhost:5000")
     print(f"  네트워크: http://{local_ip}:5000")
     print(f"  학생 앱: http://{local_ip}:5000/student")
