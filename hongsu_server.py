@@ -1074,7 +1074,8 @@ def measure_consistency_endpoint():
     연구 목적 (Cohen's k, 벡터 안정성 등).
 
     입력:
-      solution_image_b64: 학생 풀이 이미지
+      solution_image_b64: 학생 풀이 이미지 (이미지 또는 텍스트 중 하나)
+      solution_text: 학생 풀이 텍스트 (합성답안 실험용)
       problem_id: DB 문제 ID
       n_runs: 반복 횟수 (기본 3, 최대 5)
     """
