@@ -248,99 +248,6 @@ FEATURE_KEYS = [
     "final_answer_correct",        # 최종 답 정오
 ]
 
-ERROR_PROFILES = {
-    "H1": {  # 함수 정의 오류
-        "checked_uniqueness": 0.1, "checked_definition_domain": 0.5,
-        "checked_one_to_one": 0.3, "checked_composition_order": 0.5,
-        "checked_domain_restriction": 0.5,
-        "arithmetic_error": 0.1, "wrong_formula_applied": 0.2,
-        "notation_confusion": 0.3, "graph_interpretation_error": 0.1,
-        "has_reasoning": 0.4, "used_criterion": 0.2,
-        "gave_counterexample": 0.1, "final_answer_correct": 0.3,
-    },
-    "H2": {  # 정의역·공역·치역 혼동
-        "checked_uniqueness": 0.6, "checked_definition_domain": 0.1,
-        "checked_one_to_one": 0.4, "checked_composition_order": 0.5,
-        "checked_domain_restriction": 0.3,
-        "arithmetic_error": 0.3, "wrong_formula_applied": 0.5,
-        "notation_confusion": 0.7, "graph_interpretation_error": 0.2,
-        "has_reasoning": 0.4, "used_criterion": 0.3,
-        "gave_counterexample": 0.2, "final_answer_correct": 0.3,
-    },
-    "H3": {  # 그래프 판정 오류
-        "checked_uniqueness": 0.2, "checked_definition_domain": 0.5,
-        "checked_one_to_one": 0.3, "checked_composition_order": 0.5,
-        "checked_domain_restriction": 0.2,
-        "arithmetic_error": 0.1, "wrong_formula_applied": 0.2,
-        "notation_confusion": 0.3, "graph_interpretation_error": 0.8,
-        "has_reasoning": 0.4, "used_criterion": 0.2,
-        "gave_counterexample": 0.1, "final_answer_correct": 0.3,
-    },
-    "H4": {  # 일대일함수·일대일대응 오류
-        "checked_uniqueness": 0.5, "checked_definition_domain": 0.5,
-        "checked_one_to_one": 0.1, "checked_composition_order": 0.5,
-        "checked_domain_restriction": 0.2,
-        "arithmetic_error": 0.1, "wrong_formula_applied": 0.4,
-        "notation_confusion": 0.6, "graph_interpretation_error": 0.2,
-        "has_reasoning": 0.5, "used_criterion": 0.3,
-        "gave_counterexample": 0.2, "final_answer_correct": 0.4,
-    },
-    "H5": {  # 합성함수 순서 오류
-        "checked_uniqueness": 0.3, "checked_definition_domain": 0.3,
-        "checked_one_to_one": 0.1, "checked_composition_order": 0.1,
-        "checked_domain_restriction": 0.2,
-        "arithmetic_error": 0.3, "wrong_formula_applied": 0.4,
-        "notation_confusion": 0.7, "graph_interpretation_error": 0.1,
-        "has_reasoning": 0.3, "used_criterion": 0.2,
-        "gave_counterexample": 0.1, "final_answer_correct": 0.2,
-    },
-    "H6": {  # 역함수 존재 조건 오류
-        "checked_uniqueness": 0.4, "checked_definition_domain": 0.4,
-        "checked_one_to_one": 0.1, "checked_composition_order": 0.5,
-        "checked_domain_restriction": 0.2,
-        "arithmetic_error": 0.2, "wrong_formula_applied": 0.7,
-        "notation_confusion": 0.4, "graph_interpretation_error": 0.3,
-        "has_reasoning": 0.3, "used_criterion": 0.2,
-        "gave_counterexample": 0.1, "final_answer_correct": 0.3,
-    },
-    "H7": {  # 역함수 식 변형 오류
-        "checked_uniqueness": 0.5, "checked_definition_domain": 0.4,
-        "checked_one_to_one": 0.6, "checked_composition_order": 0.5,
-        "checked_domain_restriction": 0.3,
-        "arithmetic_error": 0.7, "wrong_formula_applied": 0.5,
-        "notation_confusion": 0.8, "graph_interpretation_error": 0.2,
-        "has_reasoning": 0.4, "used_criterion": 0.3,
-        "gave_counterexample": 0.1, "final_answer_correct": 0.2,
-    },
-    "H8": {  # 역함수 그래프 오류
-        "checked_uniqueness": 0.5, "checked_definition_domain": 0.4,
-        "checked_one_to_one": 0.5, "checked_composition_order": 0.5,
-        "checked_domain_restriction": 0.3,
-        "arithmetic_error": 0.2, "wrong_formula_applied": 0.4,
-        "notation_confusion": 0.5, "graph_interpretation_error": 0.7,
-        "has_reasoning": 0.4, "used_criterion": 0.3,
-        "gave_counterexample": 0.2, "final_answer_correct": 0.4,
-    },
-    "H9": {  # 유리·무리함수 확장 오류
-        "checked_uniqueness": 0.5, "checked_definition_domain": 0.6,
-        "checked_one_to_one": 0.4, "checked_composition_order": 0.5,
-        "checked_domain_restriction": 0.1,
-        "arithmetic_error": 0.3, "wrong_formula_applied": 0.4,
-        "notation_confusion": 0.4, "graph_interpretation_error": 0.6,
-        "has_reasoning": 0.4, "used_criterion": 0.3,
-        "gave_counterexample": 0.2, "final_answer_correct": 0.3,
-    },
-    "H10": {  # 근거·정당화 부족
-        "checked_uniqueness": 0.5, "checked_definition_domain": 0.5,
-        "checked_one_to_one": 0.5, "checked_composition_order": 0.5,
-        "checked_domain_restriction": 0.5,
-        "arithmetic_error": 0.3, "wrong_formula_applied": 0.3,
-        "notation_confusion": 0.3, "graph_interpretation_error": 0.3,
-        "has_reasoning": 0.1, "used_criterion": 0.1,
-        "gave_counterexample": 0.1, "final_answer_correct": 0.7,
-    },
-}
-
 ERROR_LABELS = {
     "H1": "함수 정의 오류",
     "H2": "정의역·공역·치역 혼동",
@@ -394,13 +301,9 @@ RECOMMENDED_FLOW = {
 }
 
 
-# 벡터 분류 유틸
-
-def euclidean(v1: dict, v2: dict) -> float:
-    return math.sqrt(sum((v1.get(k, 0.5) - v2.get(k, 0.5)) ** 2 for k in FEATURE_KEYS))
-
-
-# 단원별 관련 H코드 (해당 단원에서 주로 발생하는 오류)
+# ═══════════════════════════════════════════════════════
+# 단원별 관련 H코드
+# ═══════════════════════════════════════════════════════
 UNIT_H_RELEVANCE = {
     "함수":     ["H1", "H2", "H3", "H10"],
     "역함수":   ["H4", "H6", "H7", "H8", "H10"],
@@ -410,72 +313,10 @@ UNIT_H_RELEVANCE = {
 }
 
 
-def classify_error(student_vector: dict, unit: str = "") -> dict:
-    """현재 계산 방식: (추후 변경 가능 높음)
-    13차원 벡터 → 각 H와의 거리 + 최근접 유형 + 분포
-    unit이 주어지면 해당 단원과 무관한 H코드에 페널티를 줘서 분포를 명확히 함.
-
-    [거리 방식]
-    현재 유클리드 거리 + 단원 페널티 방식.
-    축 가중치(현재 균등 1:1), 거리 함수, 페널티 계수 등은 실데이터 기반 최적화 예정.
-    대안(코사인 유사도, 가중 유클리드, 클러스터링 등)도 비교 검토 중.
-
-    [근소 차이 판정]
-    1위와 2위의 거리 차(gap)가 매우 작을 때(예: 0.459 vs 0.458) 순수 수치만으로
-    최종 H코드를 결정하는 것이 적절한지 논의 필요.
-    고려 중인 방안:
-      - gap < 임계값이면 "복합 유형"으로 보고 1위·2위 동시 리포트
-      - 교사 확인(teacher_labels)을 통해 근소 차이 케이스의 판정 기준 수립
-      - 단원·문제 맥락을 가중치로 반영하여 경계 케이스 해소
-
-    [교사-AI 판정 일치도]
-    현직 교사가 판단하는 오답 원인과 LLM이 추출한 특성 벡터 기반 분류가 일치하지 않을 수 있음. 이 오차(Cohen's κ로 측정 예정)를 어떻게 반영할지 논의 필요.
-      - 교사 라벨과 AI 분류가 불일치하는 패턴을 수집하여 프로파일 보정
-      - 특정 H코드에서 체계적 불일치가 발견되면 해당 프로파일 재설계
-      - 불일치율이 높으면 특성 벡터 설계 자체를 재검토
-    """
-    relevant = UNIT_H_RELEVANCE.get(unit, [])
-    print(f"  [분류] unit='{unit}', relevant={relevant}")
-
-    distances = {}
-    for h, profile in ERROR_PROFILES.items():
-        d = euclidean(student_vector, profile)
-        # 해당 단원과 무관한 H코드는 거리 5배 페널티
-        if relevant and h not in relevant:
-            d *= 5.0
-        distances[h] = d
-
-    sorted_h = sorted(distances.items(), key=lambda x: x[1])
-
-    primary = sorted_h[0][0]
-    primary_d = sorted_h[0][1]
-    secondary = sorted_h[1][0]
-    secondary_d = sorted_h[1][1]
-    gap = secondary_d - primary_d
-
-    # 분포 (거리의 역수 제곱 → 차이를 더 크게)
-    similarities = {h: 1.0 / (1.0 + d) ** 2 for h, d in distances.items()}
-    total = sum(similarities.values())
-    distribution = {h: round(s / total, 4) for h, s in similarities.items()}
-
-    print(f"  [분류] primary={primary}({round(primary_d,3)}), secondary={secondary}({round(secondary_d,3)}), gap={round(gap,3)}")
-
-    return {
-        "primary_h": primary,
-        "primary_label": ERROR_LABELS[primary],
-        "primary_distance": round(primary_d, 4),
-        "secondary_h": secondary,
-        "secondary_label": ERROR_LABELS[secondary],
-        "secondary_distance": round(secondary_d, 4),
-        "gap": round(gap, 4),
-        "is_typical": primary_d < 1.0,
-        "distribution": distribution,
-        "all_distances": {h: round(d, 4) for h, d in distances.items()},
-    }
-
-
 # ═══════════════════════════════════════════════════════
-# H코드 직접 분류기 (LLM 기반 — 벡터 방식과 병행)
+# H코드 직접 분류기 (LLM 기반 — 현재 메인 분류 방식)
+# 향후 교사 라벨 수집 후 classify_logistic.py(로지스틱 회귀),
+# classify_dina.py(DINA)로 대체/병행 예정.
 # ═══════════════════════════════════════════════════════
 H_CRITERIA = {
     "H1": {
@@ -913,21 +754,4 @@ def grade_endpoint():
             problem_text = prob_data.get("statement", "")
         model_answer = prob_data.get("model_answer", "")
         required_reasoning = prob_data.get("required_reasoning", "")
-        observation_points = prob_data.get("observation_points", "")
-
-        if not grading_mode:
-            return jsonify({"success": False, "error": "solution_image_b64 또는 solution_text 중 하나 필수"}), 400
-
-        print(f"\n[채점 요청] mode={grading_mode}, "
-              f"problem_id={problem_id}, 참고 단계={len(solution_steps)}개")
-
-        # 참고 텍스트 조립
-        steps_str = "\n".join([f"  Step {s.get('index')}: {s.get('text')}" for s in solution_steps])
-        if not steps_str:
-            steps_str = "(없음)"
-
-        # 루브릭 정보 조립
-        rubric_list = prob_data.get("rubric", [])
-        if rubric_list:
-            rubric_str = "\n".join([
-                f"  {i+1}. {r.get('criterion', '')} 
+        observation_points = prob_data.get("observation_points",
