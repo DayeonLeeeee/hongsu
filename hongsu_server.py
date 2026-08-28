@@ -227,6 +227,50 @@ def normalize_plain(text: str) -> str:
     return s
 
 
+def _norm_for_evidence(text: str) -> str:
+    """evidence 대조용 정규화: normalize_plain + 모든 공백 제거 + 소문자화.
+    부호(-, +), 위첨자(²), 특수기호는 유지. 학생/모델의 표기 차이만 흡수."""
+    s = normalize_plain(text or "")
+    s = re.sub(r'\s+', '', s)
+    return s.lower()
+
+
+def _evidence_in_text(evidence: str, ocr_text: str) -> bool:
+    """evidence가 OCR 텍스트에 실제 존재하는지 substring 대조."""
+    if not evidence or not evidence.strip():
+        return True  # 빈 인용은 허용 (Opus에 "없으면 빈 문자열" 지시함)
+    ev = _norm_for_evidence(evidence)
+    base = _norm_for_evidence(ocr_text)
+    if not ev or not base:
+        return True  # 대조 불가는 통과 처리
+    return ev in base
+
+
+def _validate_grading_evidence(grading: dict, ocr_base: str) -> list:
+    """steps[].evidence + rubric_scores[].evidence 전수 검증.
+    반환: [{"kind": "step"|"rubric", "id": ..., "evidence": ...}, ...] (실패 목록)"""
+    if not ocr_base or not ocr_base.strip():
+        return []  # OCR 원문 없으면 검증 스킵
+    failures = []
+    for i, s in enumerate(grading.get("steps", []) or []):
+        ev = s.get("evidence", "")
+        if ev and not _evidence_in_text(ev, ocr_base):
+            failures.append({
+                "kind": "step",
+                "id": s.get("step_index", i + 1),
+                "evidence": ev,
+            })
+    for i, r in enumerate(grading.get("rubric_scores", []) or []):
+        ev = r.get("evidence", "")
+        if ev and not _evidence_in_text(ev, ocr_base):
+            failures.append({
+                "kind": "rubric",
+                "id": r.get("criterion", f"#{i+1}"),
+                "evidence": ev,
+            })
+    return failures
+
+
 # 오답 유형 프로파일 (H1~H10, 문서)
 
 FEATURE_KEYS = [
@@ -817,6 +861,59 @@ observed_errors: 관찰한 구체적 실수를 짧은 문장으로 나열.
         )
         grading = parse_tool_use(response)
 
+        # ─── 인용 검증 (evidence가 OCR/텍스트 원문에 실제 존재하는지) ───
+        ocr_base = solution_text if grading_mode == "text" else "\n".join(
+            [s.get("text", "") for s in solution_steps]
+        )
+        evidence_confidence = "high"
+        evidence_failures = _validate_grading_evidence(grading, ocr_base)
+
+        if evidence_failures:
+            print(f"  [인용 검증] 실패 {len(evidence_failures)}건 → 재시도")
+            for f in evidence_failures[:5]:
+                print(f"    {f['kind']}({f['id']}): {f['evidence'][:60]}")
+
+            # 재시도 프롬프트: 실패 인용 명시 + OCR 원문 강조
+            failed_list = "\n".join([
+                f"  - [{f['kind']} {f['id']}] \"{f['evidence']}\"" for f in evidence_failures
+            ])
+            retry_prompt = prompt + f"""
+
+[⚠ 재시도 사유]
+이전 응답의 다음 evidence 인용이 학생 풀이 원문에 존재하지 않습니다:
+{failed_list}
+
+evidence 필드는 반드시 아래 학생 풀이 원문에서 **문자 그대로** 발췌하세요.
+지어내거나 요약/의역하지 마세요. 인용할 게 없으면 빈 문자열("")로 두세요.
+
+[학생 풀이 원문 (문자 그대로 대조 대상)]
+{ocr_base}
+"""
+            if grading_mode == "image":
+                user_content_retry = [
+                    make_image_block(solution_image, "image/jpeg"),
+                    {"type": "text", "text": retry_prompt},
+                ]
+            else:
+                user_content_retry = [{"type": "text", "text": retry_prompt}]
+
+            response2 = get_claude().messages.create(
+                model=MODEL_OPUS,
+                max_tokens=4096,
+                temperature=0.0,
+                tools=[TOOL_GRADE_SOLUTION],
+                tool_choice={"type": "tool", "name": "grade_student_solution"},
+                system="수학 채점 전문가. 학생 풀이를 정확히 채점합니다.",
+                messages=[{"role": "user", "content": user_content_retry}],
+            )
+            grading = parse_tool_use(response2)
+            evidence_failures = _validate_grading_evidence(grading, ocr_base)
+            if evidence_failures:
+                evidence_confidence = "low"
+                print(f"  [인용 검증] 재시도도 실패 {len(evidence_failures)}건 → confidence=low")
+            else:
+                print(f"  [인용 검증] 재시도 통과")
+
         is_correct = grading.get("is_correct", False)
         has_wrong = any(s.get("status") == "wrong" for s in grading.get("steps", []))
 
@@ -866,6 +963,8 @@ observed_errors: 관찰한 구체적 실수를 짧은 문장으로 나열.
             "observed_errors": grading.get("observed_errors", []),
             "classification": classification,
             "feedback": feedback,
+            "evidence_confidence": evidence_confidence,
+            "evidence_failures": evidence_failures,
             "prompt_version": PROMPT_VERSION,
             "model_grading": MODEL_OPUS,
             "model_feedback": MODEL_HAIKU,
@@ -1582,4 +1681,4 @@ if __name__ == "__main__":
     print("=" * 60)
 
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    app.run(host="0.0.0.0", port=port, debug=False)  
