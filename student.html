@@ -330,9 +330,6 @@ function initCanvas() {
 function clearCanvasPixels() {
   drawCtx.fillStyle = '#fff';
   drawCtx.fillRect(0, 0, CANVAS_W, CANVAS_H);
-  drawCtx.fillStyle = '#ddd';
-  drawCtx.font = '32px sans-serif';
-  drawCtx.fillText(state.current?.title || '', 40, 60);
   drawCtx.strokeStyle = '#f0f0f0';
   drawCtx.lineWidth = 1;
   for (let y = 120; y < CANVAS_H; y += 60) {
