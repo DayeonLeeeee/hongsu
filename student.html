@@ -528,7 +528,7 @@ async function doOcr() {
     const resp = await fetch(API + '/ocr', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image: state.photoB64, mime_type: 'image/jpeg', mode: 'solution' }),
+      body: JSON.stringify({ image: state.photoB64, mime_type: 'image/jpeg' }),
     });
     const d = await resp.json();
     if (d.success && d.steps) {
@@ -607,6 +607,7 @@ async function startGrading() {
         solution_steps: state.ocrSteps,
         correct_answer: state.current?.correct_answer || '',
         grading_rules: state.current?.grading_rules || state.current?.required_reasoning || '',
+        attempt_count: state.attempts,
       }),
     });
     const d = await resp.json();
@@ -617,24 +618,38 @@ async function startGrading() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        answer_id: d.answer_id,
         problem_id: state.current?.id,
         is_correct: d.is_correct,
         student_final_answer: d.student_final_answer,
-        error_step_index: d.error_step_index,
-        features: d.features,
+        total_score: d.total_score,
+        max_score: d.max_score,
+        rubric_scores: d.rubric_scores,
         classification: d.classification,
         feedback: d.feedback,
         observed_errors: d.observed_errors,
         steps: d.steps,
         ocr_text: state.ocrText,
+        evidence_confidence: d.evidence_confidence,
+        contradiction_flags: d.contradiction_flags,
+        review_queue: d.review_queue,
+        attempt_count: d.attempt_count,
+        prompt_version: d.prompt_version,
       }),
     }).catch(()=>{});
 
     document.getElementById('grade-loading').style.display = 'none';
     if (d.is_correct) {
-      document.getElementById('grade-correct').style.display = 'flex';
-      document.getElementById('grade-attempt').textContent = state.attempts===1?'한 번에 맞췄어요!':`${state.attempts}번 만에 풀었어요`;
-      document.getElementById('grade-bottom').style.display = 'flex';
+      // 정답이어도 H10 붙었으면 결과 페이지 보여줌
+      const h10 = d.classification?.h10_global?.applies;
+      if (h10) {
+        renderGradeResult(d);
+      } else {
+        document.getElementById('grade-correct').style.display = 'flex';
+        document.getElementById('grade-attempt').textContent =
+          `${state.attempts===1?'한 번에 맞췄어요!':state.attempts+'번 만에 풀었어요'} · ${d.total_score}/${d.max_score}점`;
+        document.getElementById('grade-bottom').style.display = 'flex';
+      }
     } else {
       renderGradeResult(d);
     }
@@ -646,49 +661,126 @@ async function startGrading() {
 function renderGradeResult(d) {
   const cls = d.classification || {};
   const fb = d.feedback || {};
+  const h10 = cls.h10_global || {};
   let html = '';
 
-  // 점수 카드
+  // 점수 카드 (감점형 100점 만점)
+  const scoreColor = d.is_correct ? 'var(--ok)' : (d.total_score >= 80 ? 'var(--warn)' : 'var(--err)');
+  const scoreLabel = d.is_correct ? '정답' : '오답';
   html += `<div class="card" style="padding:20px">
     <div style="font-size:12px;font-weight:700;color:var(--sub);margin-bottom:6px">${state.current?.title||''}</div>
-    <div style="display:flex;align-items:center;gap:10px">
-      <span style="font-size:28px;font-weight:900;color:var(--err)">오답</span>
-      ${d.total_score != null ? `<span style="font-size:20px;font-weight:800;color:var(--tx)">${d.total_score}점</span>` : ''}
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <span style="font-size:28px;font-weight:900;color:${scoreColor}">${scoreLabel}</span>
+      <span style="font-size:20px;font-weight:800;color:var(--tx)">${d.total_score ?? 0}/${d.max_score ?? 100}점</span>
       ${cls.primary_h ? `<span class="chip chip-h" style="background:${HCOLORS[cls.primary_h]||'#E6493C'}1a;color:${HCOLORS[cls.primary_h]||'#E6493C'}">${cls.primary_h}</span>` : ''}
+      ${h10.applies ? `<span class="chip chip-h" style="background:#20212E1a;color:#20212E">H10 (풀이 전체)</span>` : ''}
     </div>
     ${cls.secondary_h ? `<div style="font-size:11px;color:var(--sub);margin-top:6px">보조: ${cls.secondary_h}</div>` : ''}
+    ${h10.applies && h10.reason ? `<div style="font-size:11px;color:var(--sub);margin-top:4px">H10 근거: ${h10.reason}</div>` : ''}
   </div>`;
 
-  // 루브릭별 점수
+  // 검수 큐 경고 (관리자용)
+  if (d.review_queue) {
+    let reviewReasons = [];
+    if (d.evidence_confidence === 'low') reviewReasons.push('인용 검증 실패');
+    if (d.contradiction_flags?.length) reviewReasons.push(`앞뒤 불일치 ${d.contradiction_flags.length}건`);
+    if (cls.multi_error_flag) reviewReasons.push(`복수 오류 라인 ${cls.multi_error_lines?.length||0}개`);
+    html += `<div class="card" style="background:#FFF8E6;border-color:#F0A93C;margin-top:8px">
+      <div style="font-size:12px;font-weight:800;color:#8A6D1F">⚠ 검수 필요</div>
+      <div style="font-size:11px;color:var(--sub);margin-top:4px">${reviewReasons.join(' · ')}</div>
+    </div>`;
+  }
+
+  // 정답 공개 (반복 오답 시)
+  if (d.reveal_answer && state.current?.correct_answer) {
+    html += `<div class="card" style="background:var(--pris);border-color:var(--pri);margin-top:8px">
+      <div style="font-size:12px;font-weight:800;color:var(--prid)">🔓 정답 공개</div>
+      <div style="font-size:14px;font-weight:700;color:var(--tx);margin-top:4px">${state.current.correct_answer}</div>
+      <div style="font-size:11px;color:var(--sub);margin-top:4px">${d.attempt_count}회 시도 후 공개됨</div>
+    </div>`;
+  }
+
+  // 감점형 루브릭 (4기준 × 25점)
   if (d.rubric_scores?.length) {
-    html += '<div style="font-size:13px;font-weight:800;margin:12px 0 8px">부분점수 루브릭</div><div class="card" style="padding:0;overflow:hidden;">';
+    html += '<div style="font-size:13px;font-weight:800;margin:12px 0 8px">루브릭 채점 (감점형)</div><div class="card" style="padding:0;overflow:hidden;">';
     d.rubric_scores.forEach((r, i) => {
-      const pct = r.max_points > 0 ? Math.round(r.points / r.max_points * 100) : 0;
+      const score = r.score ?? 0;
+      const maxP = r.max_points ?? 25;
+      const pct = maxP > 0 ? Math.round(score / maxP * 100) : 0;
       const color = pct >= 80 ? 'var(--ok)' : pct >= 40 ? 'var(--warn)' : 'var(--err)';
+      const dedCount = r.deductions?.length || 0;
+
       html += `<div style="padding:12px;${i > 0 ? 'border-top:1px solid var(--bdr);' : ''}">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
           <span style="font-size:13px;font-weight:700;">${r.criterion}</span>
-          <span style="font-size:14px;font-weight:800;color:${color}">${r.points}/${r.max_points}</span>
+          <span style="font-size:14px;font-weight:800;color:${color}">${score}/${maxP}</span>
         </div>
-        <div style="height:6px;background:var(--bg);border-radius:3px;overflow:hidden;margin-bottom:6px;">
+        <div style="height:6px;background:var(--bg);border-radius:3px;overflow:hidden;margin-bottom:8px;">
           <div style="height:100%;width:${pct}%;background:${color};border-radius:3px;"></div>
+        </div>`;
+
+      // 감점 내역
+      if (dedCount > 0) {
+        html += '<div style="background:var(--errs);border-radius:8px;padding:8px;margin-top:4px">';
+        html += `<div style="font-size:11px;font-weight:700;color:var(--err);margin-bottom:6px">감점 ${dedCount}건</div>`;
+        r.deductions.forEach(d => {
+          const lineTag = d.line_ref ? `L${d.line_ref}` : '전체';
+          html += `<div style="padding:4px 0;font-size:12px;line-height:1.5">
+            <span style="display:inline-block;min-width:50px;font-weight:800;color:var(--err)">${d.points}점</span>
+            <span style="color:var(--sub);font-size:10px;margin-right:4px">[${lineTag}]</span>
+            <span style="color:var(--tx)">${d.reason || ''}</span>
+            ${d.evidence ? `<div style="font-size:10px;color:var(--pri);margin-top:2px;font-style:italic;padding-left:54px">"${d.evidence}"</div>` : ''}
+          </div>`;
+        });
+        html += '</div>';
+      } else {
+        html += `<div style="font-size:11px;color:var(--ok);font-weight:600">감점 없음</div>`;
+      }
+
+      html += '</div>';
+    });
+    html += '</div>';
+  }
+
+  // 단계별 채점 (status 6종)
+  if (d.steps?.length) {
+    const statusConfig = {
+      ok:            { icon: '✓', bg: 'var(--oks)',  fg: 'var(--ok)',   label: '' },
+      wrong:         { icon: '✕', bg: 'var(--errs)', fg: 'var(--err)',  label: '오류' },
+      depends:       { icon: '↳', bg: 'var(--bg)',   fg: 'var(--sub)',  label: '전파' },
+      insufficient:  { icon: '△', bg: '#FFF8E6',     fg: '#8A6D1F',     label: '근거 부족' },
+      unreadable:    { icon: '?', bg: 'var(--bg)',   fg: 'var(--sub)',  label: '판독 불가' },
+      not_attempted: { icon: '·', bg: 'var(--bg)',   fg: 'var(--sub)',  label: '미시도' },
+    };
+
+    html += '<div style="font-size:13px;font-weight:800;margin:12px 0 8px">단계별 채점</div><div class="step-card">';
+    d.steps.forEach(s => {
+      const cfg = statusConfig[s.status] || statusConfig.ok;
+      const isWrongLike = s.status === 'wrong';
+      html += `<div class="step-row ${isWrongLike?'wrong':''}">
+        <div class="step-icon" style="background:${cfg.bg};color:${cfg.fg}">${cfg.icon}</div>
+        <div style="flex:1">
+          <div style="font-size:14px;line-height:1.6">${s.text || ''}</div>
+          ${cfg.label ? `<div style="font-size:10px;font-weight:700;color:${cfg.fg};margin-top:2px">${cfg.label}${s.depends_on_line_id ? ` (L${s.depends_on_line_id}에서 전파)` : ''}</div>` : ''}
+          ${s.explanation ? `<div style="font-size:12px;color:var(--sub);margin-top:4px">${s.explanation}</div>` : ''}
         </div>
-        ${r.reason ? `<div style="font-size:12px;color:var(--sub);line-height:1.5;">${r.reason}</div>` : ''}
-        ${r.evidence ? `<div style="font-size:11px;color:var(--pri);margin-top:4px;font-style:italic;">"${r.evidence}"</div>` : ''}
       </div>`;
     });
     html += '</div>';
   }
 
-  // 단계별
-  if (d.steps?.length) {
-    html += '<div style="font-size:13px;font-weight:800;margin:12px 0 8px">단계별 채점</div><div class="step-card">';
-    d.steps.forEach(s => {
-      const isW = s.status==='wrong';
-      const isO = s.status==='ok';
-      html += `<div class="step-row ${isW?'wrong':''}">
-        <div class="step-icon" style="background:${isO?'var(--oks)':isW?'var(--errs)':'var(--bg)'};color:${isO?'var(--ok)':isW?'var(--err)':'var(--sub)'}">${isO?'✓':isW?'✕':'?'}</div>
-        <div style="flex:1"><div style="font-size:14px;line-height:1.6">${s.text}</div>${s.explanation?`<div style="font-size:12px;color:var(--sub);margin-top:4px">${s.explanation}</div>`:''}</div>
+  // 라인별 오류 분류
+  if (cls.errors?.length) {
+    html += '<div style="font-size:13px;font-weight:800;margin:12px 0 8px">오류 유형 분류</div><div class="card">';
+    cls.errors.forEach((e, idx) => {
+      const isMulti = (e.reason || '').includes('복합 오류');
+      html += `<div style="padding:8px 0;${idx>0?'border-top:1px solid var(--bdr);':''}">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+          <span class="chip chip-h" style="background:${HCOLORS[e.h_code]||'#E6493C'}1a;color:${HCOLORS[e.h_code]||'#E6493C'}">Step ${e.step_index} → ${e.h_code}</span>
+          ${isMulti ? '<span class="chip" style="background:#FFF8E6;color:#8A6D1F">⚠ 복합</span>' : ''}
+        </div>
+        <div style="font-size:12px;color:var(--sub)">${e.reason}</div>
+        ${e.evidence ? `<div style="font-size:11px;color:var(--pri);margin-top:2px;font-style:italic">"${e.evidence}"</div>` : ''}
       </div>`;
     });
     html += '</div>';
@@ -697,8 +789,10 @@ function renderGradeResult(d) {
   // 피드백
   if (fb.feedback) {
     html += `<div style="font-size:13px;font-weight:800;margin:12px 0 8px">AI 피드백</div>
-    <div class="feedback-card"><div style="font-size:13px;line-height:1.6;color:var(--prid)">${fb.feedback}</div>
-    ${fb.next_focus?.length ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">'+fb.next_focus.map(f=>'<span style="background:var(--card);border-radius:8px;padding:4px 8px;font-size:11px;font-weight:600">📌 '+f+'</span>').join('')+'</div>':''}
+    <div class="feedback-card">
+      <div style="font-size:13px;line-height:1.6;color:var(--prid)">${fb.feedback}</div>
+      ${fb.detailed_feedback ? `<details style="margin-top:10px"><summary style="font-size:11px;color:var(--sub);cursor:pointer">자세히 보기</summary><div style="font-size:12px;line-height:1.6;color:var(--tx);margin-top:6px">${fb.detailed_feedback}</div></details>` : ''}
+      ${fb.next_focus?.length ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">'+fb.next_focus.map(f=>'<span style="background:var(--card);border-radius:8px;padding:4px 8px;font-size:11px;font-weight:600">📌 '+f+'</span>').join('')+'</div>':''}
     </div>`;
   }
 
@@ -706,21 +800,6 @@ function renderGradeResult(d) {
   if (d.observed_errors?.length) {
     html += `<div style="font-size:13px;font-weight:800;margin:12px 0 8px">관찰된 실수</div><div class="card">`;
     d.observed_errors.forEach(e => { html += `<div style="font-size:13px;color:var(--err);margin-bottom:4px">• ${e}</div>`; });
-    html += '</div>';
-  }
-
-  // 라인별 오류 분류
-  if (cls.errors?.length) {
-    html += '<div style="font-size:13px;font-weight:800;margin:12px 0 8px">오류 유형 분류</div><div class="card">';
-    cls.errors.forEach((e, idx) => {
-      html += `<div style="padding:8px 0;${idx>0?'border-top:1px solid var(--bdr);':''}">
-        <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
-          <span class="chip chip-h" style="background:${HCOLORS[e.h_code]||'#E6493C'}1a;color:${HCOLORS[e.h_code]||'#E6493C'}">Step ${e.step_index} → ${e.h_code}</span>
-        </div>
-        <div style="font-size:12px;color:var(--sub)">${e.reason}</div>
-        ${e.evidence ? `<div style="font-size:11px;color:var(--pri);margin-top:2px;font-style:italic">"${e.evidence}"</div>` : ''}
-      </div>`;
-    });
     html += '</div>';
   }
 
