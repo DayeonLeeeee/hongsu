@@ -36,7 +36,18 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
 MODEL_OPUS   = "claude-opus-4-6"
 MODEL_HAIKU  = "claude-haiku-4-5-20251001"
 MODEL_GEMINI = "gemini-2.5-flash"
-PROMPT_VERSION = "v2.1-2026-08-28"  # 변경 시 날짜와 함께 갱신
+PROMPT_VERSION = "v2.2-2026-08-29"  # 변경 시 날짜와 함께 갱신
+
+# 프롬프트 분리 모듈
+import prompts as PROMPTS
+from prompts import ocr as p_ocr
+from prompts import refine as p_refine
+from prompts import grading as p_grading
+from prompts import classify as p_classify
+from prompts import feedback as p_feedback
+
+# 반복 오답 임계값 (미확정, 임의): 이 횟수 넘게 오답이면 정답 공개
+MAX_ATTEMPTS_BEFORE_REVEAL = 3
 
 claude_client = None
 _gemini_configured = False
@@ -109,7 +120,20 @@ def make_image_block(image_b64: str, mime_type: str = "image/jpeg") -> dict:
 
 # ─── 1. Mathpix OCR ────
 def call_mathpix(image_b64: str, mime_type: str = "image/jpeg") -> str:
-    """Mathpix — 수식 특화 OCR. 실패해도 빈 문자열 반환 (병렬용)"""
+    """
+    Mathpix — 수식 특화 OCR. 실패해도 빈 문자열 반환 (병렬용).
+
+    옵션 설계:
+    - formats: ["text"]만 요청 (latex_styled는 백슬래시 반환하는데
+      프로젝트 규칙상 평문 표기라서 후처리 부담. text 필드가 이미
+      $...$ 안에 수식이 있는 평문이라 normalize_plain으로 정리 가능).
+    - math_inline_delimiters: ["$", "$"] — 수식 경계 명확히
+    - rm_spaces: false — 손글씨 간격 정보 유지 (분수 등 구분)
+    - numbers_default_to_math: true — 손글씨 숫자를 텍스트가 아닌 수식으로
+    - include_line_data: false — 라인 단위 분할은 Gemini가 담당
+    """
+    if not (MATHPIX_APP_ID and MATHPIX_APP_KEY):
+        return ""
     try:
         url = "https://api.mathpix.com/v3/text"
         headers = {
@@ -119,55 +143,34 @@ def call_mathpix(image_b64: str, mime_type: str = "image/jpeg") -> str:
         }
         payload = {
             "src": f"data:{mime_type};base64,{image_b64}",
-            "formats": ["text", "latex_styled"],
-            "data_options": {"include_latex": True},
+            "formats": ["text"],
+            "math_inline_delimiters": ["$", "$"],
+            "rm_spaces": False,
+            "numbers_default_to_math": True,
         }
         resp = http_requests.post(url, headers=headers, data=json.dumps(payload), timeout=30)
         if resp.status_code == 200:
             data = resp.json()
-            return (data.get("latex_styled") or data.get("text", "")).strip()
+            text = (data.get("text", "") or "").strip()
+            # 신뢰도 로그 (있으면)
+            conf = data.get("confidence")
+            if conf is not None:
+                print(f"  [Mathpix] confidence={conf:.2f}, {len(text)}자")
+            return text
+        else:
+            print(f"  [Mathpix 실패] HTTP {resp.status_code}: {resp.text[:120]}")
     except Exception as e:
         print(f"  [Mathpix 실패] {e}")
     return ""
 
 
 # ─── 2. Gemini Flash OCR (평문) ─────
-def call_gemini_ocr(image_b64: str, mime_type: str, mode: str = "problem") -> dict:
+def call_gemini_ocr(image_b64: str, mime_type: str) -> dict:
     """
-    Gemini Flash — 평문 OCR (표시 전용).
-    LaTeX 백슬래시 없이 사람이 읽기 쉬운 표기로 출력.
+    Gemini Flash — 학생 풀이 평문 OCR.
+    문제는 관리자가 텍스트로 입력하므로 OCR 대상 아님.
     """
-    if mode == "solution":
-        instruction = (
-            "당신은 손글씨 수학 풀이 OCR입니다. "
-            "학생이 쓴 풀이를 그대로 옮기세요. 오류를 임의로 고치지 마세요. "
-            "단계별로 번호를 나눠 배열로 반환하세요. "
-            "표기 규칙 (LaTeX 백슬래시 절대 사용 금지):\n"
-            "- 분수: (a/b)\n"
-            "- 제곱근: √n 또는 √(...)\n"
-            "- 로그 밑: log_2 72 형태 (밑을 _로)\n"
-            "- 지수: x^2, 2^n\n"
-            "- 첨자: a_n, x_1\n"
-            "- 곱셈: ×, 나눗셈: ÷\n"
-            "- 부등호: ≤ ≥ ≠\n\n"
-            "반드시 JSON으로만 응답:\n"
-            "{\"steps\": [{\"index\": 1, \"text\": \"평문 수식\"}, ...]}"
-        )
-    else:
-        instruction = (
-            "당신은 수학 문제 OCR입니다. "
-            "인쇄된 문제를 그대로 옮기세요. "
-            "표기 규칙 (LaTeX 백슬래시 절대 사용 금지):\n"
-            "- 분수: (a/b)\n"
-            "- 제곱근: √n 또는 √(...)\n"
-            "- 로그 밑: log_2 72 형태\n"
-            "- 지수: x^2\n"
-            "- 첨자: a_n\n"
-            "- 곱셈: ×, 나눗셈: ÷\n\n"
-            "반드시 JSON으로만 응답:\n"
-            '{"text": "평문 문제", "problem_number": "16", "source": "출처"}'
-        )
-
+    instruction = p_ocr.build_solution_ocr_prompt()
     try:
         model = get_gemini_model()
         response = model.generate_content(
@@ -177,9 +180,7 @@ def call_gemini_ocr(image_b64: str, mime_type: str, mode: str = "problem") -> di
         return json.loads(response.text)
     except Exception as e:
         print(f"  [Gemini OCR 실패] {e}")
-        if mode == "solution":
-            return {"steps": []}
-        return {"text": "", "problem_number": "", "source": ""}
+        return {"steps": []}
 
 
 # ─── 3. 평문 정리 (표기 정규화) ─────
@@ -261,13 +262,15 @@ def _validate_grading_evidence(grading: dict, ocr_base: str) -> list:
                 "evidence": ev,
             })
     for i, r in enumerate(grading.get("rubric_scores", []) or []):
-        ev = r.get("evidence", "")
-        if ev and not _evidence_in_text(ev, ocr_base):
-            failures.append({
-                "kind": "rubric",
-                "id": r.get("criterion", f"#{i+1}"),
-                "evidence": ev,
-            })
+        # 감점형: 각 감점 내역의 evidence를 검증
+        for j, d in enumerate(r.get("deductions", []) or []):
+            ev = d.get("evidence", "")
+            if ev and not _evidence_in_text(ev, ocr_base):
+                failures.append({
+                    "kind": "rubric_deduction",
+                    "id": f"{r.get('criterion', f'#{i+1}')}/L{d.get('line_ref',0)}",
+                    "evidence": ev,
+                })
     return failures
 
 
@@ -427,14 +430,23 @@ TOOL_CLASSIFY_H = {
                     "required": ["step_index", "h_code", "reason", "evidence"],
                 },
             },
-            "primary_h": {"type": "string", "description": "주 오류 유형 (첫 wrong 단계의 H코드, 또는 가장 핵심적인 오류)"},
+            "primary_h": {"type": ["string", "null"], "description": "주 오류 유형 (첫 wrong 단계의 H코드). wrong이 없으면 null."},
             "secondary_h": {
                 "type": ["string", "null"],
                 "description": "보조 오류 유형 (다른 wrong 단계의 H코드). 없으면 null.",
             },
+            "h10_global": {
+                "type": "object",
+                "description": "H10(근거·정당화 부족)은 라인이 아닌 풀이 전체로 판정.",
+                "properties": {
+                    "applies": {"type": "boolean", "description": "풀이 전체가 근거 부족에 해당하면 true"},
+                    "reason": {"type": "string", "description": "H10 판정 이유 (한 문장). applies=false면 빈 문자열."},
+                },
+                "required": ["applies", "reason"],
+            },
             "no_error": {"type": "boolean", "description": "오류가 전혀 없으면 true"},
         },
-        "required": ["errors", "primary_h", "no_error"],
+        "required": ["errors", "primary_h", "h10_global", "no_error"],
     },
 }
 
@@ -446,7 +458,8 @@ def classify_error_direct(grading_result: dict, problem_text: str, solution_text
         wrong_steps = [s for s in steps if s.get("status") == "wrong"]
 
         if not wrong_steps:
-            return {"method": "direct", "no_error": True, "errors": [], "primary_h": None, "secondary_h": None}
+            # wrong 없지만 H10은 별도 판정 대상 → 프롬프트에 넣어 판단시킴
+            pass  # 이 경우도 아래 흐름으로 진입해서 h10_global만 확인
 
         # H코드 판정기준 조립
         criteria_text = "\n".join([
@@ -459,28 +472,12 @@ def classify_error_direct(grading_result: dict, problem_text: str, solution_text
             for s in steps
         ])
 
-        prompt = f"""아래 학생 풀이의 채점 결과를 보고, wrong으로 판정된 각 단계의 오류를 H1~H10 중 하나로 분류하세요.
-
-[문제]
-{problem_text}
-
-[학생 풀이 + 채점 결과]
-{wrong_desc}
-
-[관찰된 실수]
-{', '.join(grading_result.get('observed_errors', []))}
-
-[H코드 판정 기준]
-{criteria_text}
-
-[규칙]
-1. wrong 단계마다 가장 잘 맞는 H코드 1개를 배정하세요.
-2. 학생 풀이 원문에서 근거를 직접 인용(evidence)하세요.
-3. 풀이 전체에 근거가 부족하면 step_index=0으로 H10을 추가할 수 있습니다.
-4. primary_h = 첫 wrong 단계의 H코드. secondary_h = 다른 wrong 단계의 H코드 (있으면).
-5. 오류가 없으면 no_error=true.
-
-반드시 classify_h_code tool로만 응답하세요."""
+        prompt = p_classify.build(
+            problem_text=problem_text,
+            wrong_desc=wrong_desc,
+            observed_errors_str=', '.join(grading_result.get('observed_errors', [])),
+            criteria_text=criteria_text,
+        )
 
         response = get_claude().messages.create(
             model=MODEL_OPUS,
@@ -492,10 +489,31 @@ def classify_error_direct(grading_result: dict, problem_text: str, solution_text
         )
         result = parse_tool_use(response)
         result["method"] = "direct"
+
+        # Edge Case: 라인당 복수 오류 자동 감지 (reason에 "복합 오류 감지" 포함 여부)
+        multi_error_lines = []
+        for err in result.get("errors", []):
+            if "복합 오류" in err.get("reason", ""):
+                multi_error_lines.append({
+                    "step_index": err.get("step_index"),
+                    "selected_h": err.get("h_code"),
+                    "reason": err.get("reason"),
+                })
+        result["multi_error_flag"] = len(multi_error_lines) > 0
+        result["multi_error_lines"] = multi_error_lines
+        if multi_error_lines:
+            print(f"  ⚠️ 복수 오류 감지: {len(multi_error_lines)}개 라인 → 검수 큐 대상")
+
         return result
     except Exception as e:
         print(f"  [직접 분류 실패] {e}")
-        return {"method": "direct", "no_error": False, "errors": [], "primary_h": None, "error_msg": str(e)}
+        return {
+            "method": "direct", "no_error": False, "errors": [],
+            "primary_h": None, "secondary_h": None,
+            "h10_global": {"applies": False, "reason": ""},
+            "multi_error_flag": False, "multi_error_lines": [],
+            "error_msg": str(e),
+        }
 
 
 # Tool 정의 (tool_use 강제)
@@ -538,32 +556,77 @@ TOOL_GRADE_SOLUTION = {
                 "items": {
                     "type": "object",
                     "properties": {
-                        "index": {"type": "integer"},
+                        "index": {"type": "integer", "description": "줄 번호 (1부터)"},
                         "text": {"type": "string", "description": "학생이 쓴 내용 (평문)"},
-                        "status": {"type": "string", "enum": ["ok", "wrong", "depends"]},
+                        "status": {
+                            "type": "string",
+                            "enum": ["ok", "wrong", "depends", "insufficient", "unreadable", "not_attempted"],
+                            "description": (
+                                "ok=올바름, wrong=독립 오류, depends=앞 오류 전파, "
+                                "insufficient=근거 부족(맞지만 서술 미흡), "
+                                "unreadable=OCR/필기 판독 불가, "
+                                "not_attempted=시도 자체가 없음"
+                            ),
+                        },
                         "explanation": {"type": "string", "description": "이 단계에 대한 짧은 설명"},
+                        "depends_on_line_id": {
+                            "type": ["integer", "null"],
+                            "description": "status=depends일 때, 어느 줄에서 전파된 오류인지 (해당 줄 index). 다른 status면 null.",
+                        },
                     },
                     "required": ["index", "text", "status", "explanation"],
                 },
             },
             "rubric_scores": {
                 "type": "array",
-                "description": "루브릭 기준별 부분점수. 프롬프트에 주어진 루브릭 순서대로.",
+                "description": "감점형 루브릭 채점. 4기준 각 25점 만점, 감점 사유마다 근거 필수.",
                 "items": {
                     "type": "object",
                     "properties": {
-                        "criterion": {"type": "string", "description": "기준명 (예: 개념 사용)"},
-                        "points": {"type": "integer", "description": "부여한 점수 (0 ~ max_points)"},
-                        "max_points": {"type": "integer", "description": "이 기준의 배점"},
-                        "reason": {"type": "string", "description": "왜 이 점수인지 근거 (감점 사유 또는 만점 이유)"},
-                        "evidence": {"type": "string", "description": "학생 풀이에서 뽑은 증거 인용 (없으면 빈 문자열)"},
+                        "criterion": {
+                            "type": "string",
+                            "enum": ["개념 사용", "근거 제시", "계산·표현", "결론"],
+                            "description": "4기준 중 하나",
+                        },
+                        "max_points": {"type": "integer", "const": 25, "description": "각 기준 만점은 25점 고정"},
+                        "deductions": {
+                            "type": "array",
+                            "description": "감점 내역. 감점 없으면 빈 배열. 냅다 점수 깎지 말고 근거마다 나열.",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "points": {
+                                        "type": "integer",
+                                        "description": "감점 (음수. 예: -5). 25점을 한 번에 다 깎지 말고, 감점 척도표에 따라 나눠서 기록할 것.",
+                                    },
+                                    "reason": {"type": "string", "description": "감점 사유 (구체적으로)"},
+                                    "line_ref": {
+                                        "type": "integer",
+                                        "description": "감점 근거가 있는 학생 풀이 줄 번호. 특정 줄 없으면 0.",
+                                    },
+                                    "evidence": {
+                                        "type": "string",
+                                        "description": "학생 풀이에서 감점 근거 원문 인용 (없으면 빈 문자열)",
+                                    },
+                                },
+                                "required": ["points", "reason", "line_ref", "evidence"],
+                            },
+                        },
+                        "score": {
+                            "type": "integer",
+                            "description": "이 기준의 최종 점수 = max(0, 25 - 감점 합계). 음수 불가.",
+                            "minimum": 0,
+                            "maximum": 25,
+                        },
                     },
-                    "required": ["criterion", "points", "max_points", "reason", "evidence"],
+                    "required": ["criterion", "max_points", "deductions", "score"],
                 },
             },
             "total_score": {
                 "type": "integer",
-                "description": "루브릭 점수 합산 (전체 배점 중 몇 점)",
+                "description": "4기준 score 합계 (0~100). 100 - 전체 감점.",
+                "minimum": 0,
+                "maximum": 100,
             },
             "observed_errors": {
                 "type": "array",
@@ -610,53 +673,40 @@ TOOL_PERSONAL_FEEDBACK = {
 @app.route("/ocr", methods=["POST"])
 def ocr_endpoint():
     """
-    Mathpix + Gemini Flash 병렬 실행 → 평문 텍스트 반환.
-    표시 전용. 채점/풀이 생성은 이미지 원본을 별도로 사용.
+    학생 풀이 OCR: Mathpix + Gemini Flash 병렬 실행 → 단계별 평문 텍스트 반환.
+    문제는 관리자가 텍스트로 등록하므로 OCR 대상 아님.
     """
     try:
         data = request.get_json()
         image_b64 = data.get("image", "")
         mime_type = data.get("mime_type", "image/jpeg")
-        mode = data.get("mode", "problem")   # "problem" | "solution"
 
-        print(f"\n[OCR 요청] mode={mode}, 이미지={len(image_b64)//1024}KB")
+        print(f"\n[OCR 요청] 이미지={len(image_b64)//1024}KB")
 
         # 병렬 실행
         f_mathpix = executor.submit(call_mathpix, image_b64, mime_type)
-        f_gemini  = executor.submit(call_gemini_ocr, image_b64, mime_type, mode)
+        f_gemini  = executor.submit(call_gemini_ocr, image_b64, mime_type)
         mathpix_result = f_mathpix.result()
         gemini_result  = f_gemini.result()
 
         print(f"  → Mathpix: {mathpix_result[:60]}")
         print(f"  → Gemini: {json.dumps(gemini_result, ensure_ascii=False)[:100]}")
 
-        if mode == "solution":
-            steps = gemini_result.get("steps", [])
-            # 각 단계 평문 정규화
-            steps = [
-                {"index": s.get("index", i + 1), "text": normalize_plain(s.get("text", ""))}
-                for i, s in enumerate(steps)
-            ]
-            return jsonify({
-                "success": True,
-                "mode": "solution",
-                "steps": steps,
-                "mathpix_raw": mathpix_result,
-                "confidence": 0.9 if steps else 0.3,
-                "timestamp": now_iso(),
-            })
-        else:
-            final_text = normalize_plain(gemini_result.get("text", ""))
-            return jsonify({
-                "success": True,
-                "mode": "problem",
-                "final_text": final_text,
-                "problem_number": gemini_result.get("problem_number", ""),
-                "source": gemini_result.get("source", ""),
-                "mathpix_raw": mathpix_result,
-                "confidence": 0.9 if final_text else 0.3,
-                "timestamp": now_iso(),
-            })
+        steps = gemini_result.get("steps", [])
+        steps = [
+            {"index": s.get("index", i + 1), "text": normalize_plain(s.get("text", ""))}
+            for i, s in enumerate(steps)
+        ]
+        return jsonify({
+            "success": True,
+            "steps": steps,
+            "mathpix_raw": mathpix_result,
+            "timestamp": now_iso(),
+        })
+
+    except Exception as e:
+        print(f"  [OCR 에러] {traceback.format_exc()}")
+        return jsonify({"success": False, "error": str(e)}), 500
 
     except Exception as e:
         print(f"  [OCR 에러] {traceback.format_exc()}")
@@ -679,21 +729,7 @@ def refine_endpoint():
 
         print(f"\n[수정 요청] instruction={user_instruction[:60]}")
 
-        prompt = f"""당신은 수학 OCR 편집 도우미입니다.
-
-[현재 OCR 결과]
-{current_text}
-
-[사용자 수정 지시]
-{user_instruction}
-
-[작업]
-1. 사용자 지시를 이해하고 현재 텍스트를 수정하세요.
-2. 원본 이미지를 참고하여 사용자 지적이 이미지와 일치하는지 확인.
-3. 이미지와 다르면 사용자 지적을 우선하되, note 필드로 안내.
-4. 평문 표기 유지 (LaTeX 백슬래시 사용 금지).
-
-반드시 refine_ocr_text tool로만 응답하세요."""
+        prompt = p_refine.build(current_text=current_text, user_instruction=user_instruction)
 
         response = get_claude().messages.create(
             model=MODEL_HAIKU,
@@ -748,6 +784,7 @@ def grade_endpoint():
         grading_rules = data.get("grading_rules", "")
         problem_id = data.get("problem_id", "")
         unit = data.get("unit", "")
+        attempt_count = int(data.get("attempt_count", 1))  # 프론트에서 재도전 횟수 전송
         grading_mode = "image" if solution_image else "text" if solution_text else None
 
         # 문제 ID로 추가 정보 조회
@@ -775,71 +812,17 @@ def grade_endpoint():
         if not steps_str:
             steps_str = "(없음)"
 
-        # 루브릭 정보 조립
-        rubric_list = prob_data.get("rubric", [])
-        if rubric_list:
-            rubric_str = "\n".join([
-                f"  {i+1}. {r.get('criterion', '')} ({r.get('max_points', 25)}점): {r.get('description', '')}"
-                for i, r in enumerate(rubric_list)
-            ])
-            total_max = sum(r.get("max_points", 0) for r in rubric_list)
-        else:
-            rubric_str = "  1. 개념 사용 (25점)\n  2. 근거 제시 (25점)\n  3. 계산·표현 (25점)\n  4. 결론 (25점)"
-            total_max = 100
-
-        # 관찰 지점 조립
-        obs_section = ""
-        if observation_points:
-            obs_section = f"\n[관찰 지점 — 이 문제에서 특히 주의해서 볼 부분]\n{observation_points}\n"
-
-        # 모드별 프롬프트 도입부
-        if grading_mode == "image":
-            prompt_intro = "첨부된 이미지는 학생의 손글씨 풀이입니다. 아래 문제 정보와 대조하여 채점하세요."
-            solution_section = f"[학생 풀이 OCR (참고, 이미지가 항상 우선)]\n{steps_str}"
-        else:
-            prompt_intro = "아래 학생 풀이 텍스트를 문제 정보와 대조하여 채점하세요."
-            solution_section = f"[학생 풀이]\n{solution_text}"
-
-        prompt = f"""당신은 고등학교 수학 채점 전문가입니다.
-
-{prompt_intro}
-
-[문제 텍스트]
-{problem_text if problem_text else "(제공 안 됨)"}
-
-[모범답안]
-{model_answer if model_answer else "(없음)"}
-
-[필수 풀이 근거]
-{required_reasoning if required_reasoning else "(없음)"}
-
-[알려진 정답]
-{correct_answer if correct_answer else "(없음, 스스로 풀어 확인)"}
-{obs_section}
-{solution_section}
-
-[채점 원칙 — 위에서부터 순차 채점]
-1. 문제를 직접 풀어 정답을 스스로 구한 뒤 학생 풀이를 채점하세요.
-2. 학생 풀이를 첫 단계부터 순서대로 읽으며 채점하세요.
-3. 학생이 다른 방법을 써도 논리적으로 타당하면 ok.
-4. 표기 실수는 관대하게, 실제 수학적 오류만 wrong으로.
-5. 앞 단계의 오류에서 전파된 결과만 depends로 표시하세요.
-6. 앞 오류와 무관한 독립적인 새 오류는 별도로 wrong 표시하세요. (한 풀이에 wrong이 여러 개일 수 있음)
-7. 최종 답이 맞고 논리에 큰 결함 없으면 is_correct=true.
-
-[부분점수 루브릭 - 반드시 각 기준별로 점수를 매기세요]
-총 배점: {total_max}점
-{rubric_str}
-
-각 루브릭 기준에 대해:
-- points: 0 ~ max_points 사이 정수. 기준을 완벽히 충족하면 만점, 전혀 못하면 0점.
-- reason: 왜 이 점수를 줬는지 한 문장 (감점 사유 또는 만점 근거).
-- evidence: 학생 풀이에서 해당 부분 직접 인용 (없으면 빈 문자열).
-total_score: 모든 루브릭 points의 합산.
-
-observed_errors: 관찰한 구체적 실수를 짧은 문장으로 나열.
-
-반드시 grade_student_solution tool로만 응답하세요."""
+        prompt = p_grading.build(
+            grading_mode=grading_mode,
+            problem_text=problem_text,
+            model_answer=model_answer,
+            required_reasoning=required_reasoning,
+            correct_answer=correct_answer,
+            observation_points=observation_points,
+            deduction_scale=prob_data.get("deduction_scale", {}),
+            steps_str=steps_str,
+            solution_text=solution_text,
+        )
 
         # 모드별 Claude 호출
         if grading_mode == "image":
@@ -877,18 +860,11 @@ observed_errors: 관찰한 구체적 실수를 짧은 문장으로 나열.
             failed_list = "\n".join([
                 f"  - [{f['kind']} {f['id']}] \"{f['evidence']}\"" for f in evidence_failures
             ])
-            retry_prompt = prompt + f"""
-
-[⚠ 재시도 사유]
-이전 응답의 다음 evidence 인용이 학생 풀이 원문에 존재하지 않습니다:
-{failed_list}
-
-evidence 필드는 반드시 아래 학생 풀이 원문에서 **문자 그대로** 발췌하세요.
-지어내거나 요약/의역하지 마세요. 인용할 게 없으면 빈 문자열("")로 두세요.
-
-[학생 풀이 원문 (문자 그대로 대조 대상)]
-{ocr_base}
-"""
+            retry_prompt = p_grading.build_retry(
+                base_prompt=prompt,
+                failed_list=failed_list,
+                ocr_base=ocr_base,
+            )
             if grading_mode == "image":
                 user_content_retry = [
                     make_image_block(solution_image, "image/jpeg"),
@@ -917,14 +893,51 @@ evidence 필드는 반드시 아래 학생 풀이 원문에서 **문자 그대�
         is_correct = grading.get("is_correct", False)
         has_wrong = any(s.get("status") == "wrong" for s in grading.get("steps", []))
 
+        # ─── S4-5: 앞뒤 불일치 감지 ("정답 판정인데 오류 evidence 있음") ───
+        contradiction_flags = []
+        if is_correct:
+            # 정답으로 판정했는데 wrong 단계가 있으면 모순
+            wrong_steps_for_check = [s for s in grading.get("steps", []) if s.get("status") == "wrong"]
+            if wrong_steps_for_check:
+                contradiction_flags.append({
+                    "type": "correct_but_wrong_steps",
+                    "detail": f"is_correct=true인데 wrong 단계 {len(wrong_steps_for_check)}개 존재",
+                    "step_indices": [s.get("index") for s in wrong_steps_for_check],
+                })
+            # 정답으로 판정했는데 감점이 크면 (total_score < 80) 모순
+            interim_total = sum(rs.get("score", 0) for rs in grading.get("rubric_scores", []))
+            if interim_total < 80:
+                contradiction_flags.append({
+                    "type": "correct_but_low_score",
+                    "detail": f"is_correct=true인데 total_score={interim_total} (기준 80 미만)",
+                })
+
+        if contradiction_flags:
+            print(f"  ⚠️ S4-5 모순 감지: {len(contradiction_flags)}건 → confidence=low, 검수 큐로")
+            for cf in contradiction_flags:
+                print(f"    [{cf['type']}] {cf['detail']}")
+            evidence_confidence = "low"  # 모순도 confidence 강등 사유
+
         if is_correct and not has_wrong:
-            # 정답 풀이 → H코드 "해당 없음"
-            classification = {
-                "primary_h": None, "secondary_h": None,
-                "no_error": True, "errors": [], "method": "direct",
-            }
-            feedback = {"feedback": "", "detailed_feedback": "", "next_focus": []}
-            print(f"  [분류] 정답 — H코드 해당 없음")
+            # 정답 풀이 → wrong 없음. 그래도 H10(근거 부족)은 별도 판정.
+            classification = classify_error_direct(grading, problem_text,
+                                                   solution_text if grading_mode == "text" else steps_str)
+            # 정답이면 primary/secondary는 강제로 없음. h10_global만 유효.
+            classification["primary_h"] = None
+            classification["secondary_h"] = None
+            h10_applies = classification.get("h10_global", {}).get("applies", False)
+
+            if h10_applies:
+                # 정답이지만 근거 부족 → H10 피드백만 짧게
+                feedback = generate_feedback(
+                    h_code="H10",
+                    observed_errors=grading.get("observed_errors", []),
+                    student_context=solution_text if grading_mode == "text" else steps_str,
+                )
+                print(f"  [분류] 정답 — H10 전역 판정 적용")
+            else:
+                feedback = {"feedback": "", "detailed_feedback": "", "next_focus": []}
+                print(f"  [분류] 정답 — H코드 해당 없음")
         else:
             # LLM 직접 분류 (메인 방식)
             sol_context = solution_text if grading_mode == "text" else steps_str
@@ -944,27 +957,56 @@ evidence 필드는 반드시 아래 학생 풀이 원문에서 **문자 그대�
 
         # 루브릭 점수 추출
         rubric_scores = grading.get("rubric_scores", [])
-        total_score = grading.get("total_score", 0)
-        if not total_score and rubric_scores:
-            total_score = sum(r.get("points", 0) for r in rubric_scores)
 
-        print(f"  [루브릭] {len(rubric_scores)}개 기준, 총점={total_score}")
+        # 감점형: 각 기준 score를 검증하고 total 재계산
         for rs in rubric_scores:
-            print(f"    {rs.get('criterion')}: {rs.get('points')}/{rs.get('max_points')} - {rs.get('reason','')[:40]}")
+            deductions = rs.get("deductions", [])
+            deduction_sum = sum(d.get("points", 0) for d in deductions)  # 감점은 음수
+            calculated = max(0, 25 + deduction_sum)  # 25 + (-감점합) = 남은 점수
+            # LLM이 보고한 score와 계산값이 다르면 계산값 우선
+            if rs.get("score") != calculated:
+                print(f"    [보정] {rs.get('criterion')}: LLM={rs.get('score')}, 계산={calculated}")
+                rs["score"] = calculated
+
+        total_score = sum(rs.get("score", 0) for rs in rubric_scores)
+        # LLM이 보고한 total과 다르면 계산값 우선
+        if grading.get("total_score") != total_score:
+            print(f"  [보정] total_score: LLM={grading.get('total_score')}, 계산={total_score}")
+
+        print(f"  [루브릭] {len(rubric_scores)}개 기준, 총점={total_score}/100")
+        for rs in rubric_scores:
+            deds = rs.get("deductions", [])
+            print(f"    {rs.get('criterion')}: {rs.get('score')}/25 (감점 {len(deds)}건)")
+            for d in deds:
+                print(f"      L{d.get('line_ref',0)} {d.get('points')}: {d.get('reason','')[:40]}")
+
+        # answer_id: 이 채점 결과의 고유 식별자 (시트 병합 키)
+        answer_id = f"A-{now_iso().replace(':','').replace('-','').replace('.','')[:15]}-{problem_id or 'X'}"
 
         result = {
             "success": True,
+            "answer_id": answer_id,
+            "problem_id": problem_id,
             "is_correct": is_correct,
             "grading_mode": grading_mode,
             "student_final_answer": grading.get("student_final_answer", ""),
             "steps": grading.get("steps", []),
             "rubric_scores": rubric_scores,
             "total_score": total_score,
+            "max_score": 100,
             "observed_errors": grading.get("observed_errors", []),
             "classification": classification,
             "feedback": feedback,
             "evidence_confidence": evidence_confidence,
             "evidence_failures": evidence_failures,
+            "contradiction_flags": contradiction_flags,
+            "review_queue": (
+                evidence_confidence == "low"
+                or bool(contradiction_flags)
+                or bool(classification.get("multi_error_flag"))
+            ),
+            "attempt_count": attempt_count,
+            "reveal_answer": (not is_correct) and attempt_count >= MAX_ATTEMPTS_BEFORE_REVEAL,
             "prompt_version": PROMPT_VERSION,
             "model_grading": MODEL_OPUS,
             "model_feedback": MODEL_HAIKU,
@@ -989,34 +1031,15 @@ def generate_feedback(h_code: str, observed_errors: list, student_context: str) 
         label = ERROR_LABELS.get(h_code, h_code)
         flow = RECOMMENDED_FLOW.get(h_code, "")
 
-        prompt = f"""학생에게 줄 피드백을 작성하세요. 짧은 버전과 상세 버전 두 가지를 모두 만드세요.
-
-[진단된 오답 유형]
-{h_code}: {label}
-
-[표준 피드백 예시 (참고용, 그대로 쓰지 말 것)]
-{template}
-
-[누락 개념]
-{', '.join(concepts)}
-
-[추천 학습 흐름]
-{flow}
-
-[이 학생의 구체적 실수]
-{chr(10).join('- ' + e for e in observed_errors) if observed_errors else "(관찰 없음)"}
-
-[학생 풀이 요약]
-{student_context}
-
-[규칙]
-1. feedback (짧은 피드백): 학생 풀이의 구체적 증거를 언급하며 시작. 빠진 개념을 짚고, 다음에 뭘 확인할지 안내. 2문장 이내.
-2. detailed_feedback (상세 피드백): 왜 이 부분이 틀렸는지 설명하고, 올바른 접근법을 보여주고, 비슷한 문제에서 주의할 점까지 안내. 3~5문장.
-3. "틀렸다"보다 "다음에 어떻게 하면 되는지" 어조.
-4. 표준 피드백 예시를 그대로 복사하지 말고, 이 학생의 실수에 맞게 변형하세요.
-5. next_focus에는 추천 학습 흐름에서 이 학생에게 가장 필요한 1~2개를 골라 넣으세요.
-
-반드시 compose_feedback tool로만 응답하세요."""
+        prompt = p_feedback.build(
+            h_code=h_code,
+            label=label,
+            template=template,
+            concepts_str=', '.join(concepts),
+            flow=flow,
+            observed_errors_str=(chr(10).join('- ' + e for e in observed_errors) if observed_errors else "(관찰 없음)"),
+            student_context=student_context,
+        )
 
         response = get_claude().messages.create(
             model=MODEL_HAIKU,
@@ -1197,8 +1220,8 @@ def save_to_supabase(result_data: dict):
         return
 
     try:
-        cls = result_data.get("classification", {})
-        fb = result_data.get("feedback", {})
+        cls = result_data.get("classification", {}) or {}
+        fb = result_data.get("feedback", {}) or {}
         problem_id = result_data.get("problem_id", "")
 
         # 1. submissions 저장
@@ -1208,7 +1231,7 @@ def save_to_supabase(result_data: dict):
                 "problem_id": problem_id,
                 "ocr_text": result_data.get("ocr_text", ""),
                 "ocr_steps": result_data.get("solution_steps"),
-                "attempt_number": 1,
+                "attempt_number": result_data.get("attempt_count", 1),
             }
             sub_resp = sb.table("submissions").insert(sub_row).execute()
             if sub_resp.data:
@@ -1217,21 +1240,36 @@ def save_to_supabase(result_data: dict):
         except Exception as e:
             print(f"  [Supabase] submission 저장 실패 (무시): {e}")
 
-        # 2. gradings 저장
+        # 2. gradings 저장 (v2.2 확장 필드 포함)
         grading_id = None
         grade_row = {
             "problem_id": problem_id,
+            "answer_id": result_data.get("answer_id"),
             "is_correct": result_data.get("is_correct", False),
             "student_answer": result_data.get("student_final_answer", ""),
-            "graded_steps": result_data.get("steps"),
+            "graded_steps": result_data.get("steps"),  # status 6종 + depends_on_line_id 포함
             "observed_errors": result_data.get("observed_errors"),
-            "primary_h": cls.get("primary_h", ""),
+            "primary_h": cls.get("primary_h"),
             "secondary_h": cls.get("secondary_h"),
-
+            "h10_global": cls.get("h10_global"),
+            "multi_error_flag": cls.get("multi_error_flag", False),
+            "multi_error_lines": cls.get("multi_error_lines"),
             "feedback_text": fb.get("feedback", ""),
+            "detailed_feedback": fb.get("detailed_feedback", ""),
             "next_focus": fb.get("next_focus"),
             "total_score": result_data.get("total_score"),
-            "model_version": "v2",
+            "max_score": result_data.get("max_score", 100),
+            "grading_mode": result_data.get("grading_mode"),
+            "prompt_version": result_data.get("prompt_version"),
+            "model_grading": result_data.get("model_grading"),
+            "model_feedback": result_data.get("model_feedback"),
+            "attempt_count": result_data.get("attempt_count", 1),
+            "reveal_answer": result_data.get("reveal_answer", False),
+            "evidence_confidence": result_data.get("evidence_confidence", "high"),
+            "evidence_failures": result_data.get("evidence_failures"),
+            "contradiction_flags": result_data.get("contradiction_flags"),
+            "review_queue": result_data.get("review_queue", False),
+            "model_version": "v2.2",
         }
         if submission_id:
             grade_row["submission_id"] = submission_id
@@ -1241,29 +1279,26 @@ def save_to_supabase(result_data: dict):
             grading_id = grade_resp.data[0].get("grading_id")
             print(f"  [Supabase] grading 저장 완료 (id={grading_id})")
 
-        # 3. rubric_scores 저장 (문제의 루브릭 + AI 채점 결과가 있으면)
+        # 3. rubric_scores 저장 (감점형: criterion + deductions JSONB)
         if grading_id and problem_id:
             try:
-                # DB에서 이 문제의 루브릭 조회
                 rub_resp = sb.table("rubrics").select("*").eq("problem_id", problem_id).order("sort_order").execute()
                 rubrics = rub_resp.data if rub_resp.data else []
 
-                # 인메모리에서 루브릭 점수 (AI가 반환했으면)
                 rubric_scores_data = result_data.get("rubric_scores", [])
 
-                if rubrics and rubric_scores_data:
-                    for i, rub in enumerate(rubrics):
-                        score_data = rubric_scores_data[i] if i < len(rubric_scores_data) else {}
+                if rubric_scores_data:
+                    for i, score_data in enumerate(rubric_scores_data):
                         row = {
                             "grading_id": grading_id,
-                            "rubric_id": rub["rubric_id"],
-                            "points": score_data.get("points", 0),
-                            "max_points": rub["max_points"],
-                            "reason": score_data.get("reason", ""),
-                            "evidence": score_data.get("evidence", ""),
+                            "rubric_id": rubrics[i]["rubric_id"] if i < len(rubrics) else None,
+                            "criterion": score_data.get("criterion", ""),
+                            "points": score_data.get("score", 0),
+                            "max_points": 25,
+                            "deductions": score_data.get("deductions", []),  # JSONB 배열 그대로
                         }
                         sb.table("rubric_scores").insert(row).execute()
-                    print(f"  [Supabase] rubric_scores {len(rubrics)}개 저장 완료")
+                    print(f"  [Supabase] rubric_scores {len(rubric_scores_data)}개 저장 완료")
             except Exception as e:
                 print(f"  [Supabase] rubric_scores 저장 실패 (무시): {e}")
 
@@ -1295,6 +1330,8 @@ def load_problems_from_supabase():
                         "score": p.get("score", 100),
                         "model_answer": p.get("model_answer", ""),
                         "required_reasoning": p.get("required_reasoning", ""),
+                        "observation_points": p.get("observation_points", ""),  # 관찰 지점
+                        "deduction_scale": p.get("deduction_scale", {}),        # 감점 척도 (v2.2)
                         "grading_rules": p.get("grading_rules", ""),
                         "expected_errors": p.get("expected_errors", []),
                         "feedback_example": p.get("feedback_example", ""),
@@ -1344,6 +1381,7 @@ def add_problem():
         "grading_rules": data.get("grading_rules", ""),             # 전체 채점 룰 텍스트
         "required_reasoning": data.get("required_reasoning", ""),   # 필수 풀이 근거
         "observation_points": data.get("observation_points", ""),   # 관찰 지점
+        "deduction_scale": data.get("deduction_scale", {}),          # 감점 척도 (교수님 제공, 4기준별 설명)
         "rubric": data.get("rubric", []),                           # 부분점수 루브릭 [{기준, 서술 기준}, ...]
         "expected_errors": data.get("expected_errors", []),         # 예상 오류 H코드 목록
         "model_answer": data.get("model_answer", ""),               # 모범답안 텍스트
@@ -1483,9 +1521,9 @@ def export_results_csv():
 
     # 헤더
     writer.writerow([
-        "result_id", "problem_id", "student_id", "is_correct",
-        "student_final_answer", "total_score",
-        "primary_h", "secondary_h",
+        "result_id", "answer_id", "problem_id", "student_id", "is_correct",
+        "student_final_answer", "total_score", "max_score",
+        "primary_h", "secondary_h", "h10_global_applies", "h10_global_reason",
         "observed_errors",
         "feedback", "detailed_feedback",
         "prompt_version", "model_grading", "model_feedback",
@@ -1495,15 +1533,20 @@ def export_results_csv():
     for rid, r in _results_db.items():
         cls = r.get("classification", {}) or {}
         fb = r.get("feedback", {})
+        h10 = cls.get("h10_global", {}) or {}
         writer.writerow([
             rid,
+            r.get("answer_id", ""),
             r.get("problem_id", ""),
             r.get("student_id", ""),
             r.get("is_correct", ""),
             r.get("student_final_answer", ""),
             r.get("total_score", ""),
+            r.get("max_score", 100),
             cls.get("primary_h", ""),
             cls.get("secondary_h", ""),
+            h10.get("applies", ""),
+            h10.get("reason", ""),
             "; ".join(r.get("observed_errors", [])),
             fb.get("feedback", ""),
             fb.get("detailed_feedback", ""),
