@@ -14,7 +14,5 @@ Hongsu 프롬프트 모음.
 프롬프트 수정 시 각 파일 상단 VERSION을 반드시 갱신 (YYYY-MM-DD 포함).
 """
 
-from . import ocr, refine, grading, classify, feedback
-
 # 전체 프롬프트 버전 (개별 파일 버전과 별개, 서버 결과에 기록)
 OVERALL_VERSION = "v2.2-2026-08-29"
