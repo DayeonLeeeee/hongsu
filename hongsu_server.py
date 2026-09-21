@@ -1,7 +1,7 @@
 """
 파이프라인:
   1. 풀이 OCR:     Mathpix + Gemini Flash 병렬 → 단계별 평문 (표시용)
-  2. 자연어 수정:  Claude Haiku (vision + tool_use)
+  2. 자연어 수정:  Claude Haiku (vision + tool_use)ss
   3. 채점:         Claude Opus 4.6 (vision + tool_use)
                     → observed_errors
                     → 직접분류기 사용. 
