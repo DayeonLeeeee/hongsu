@@ -482,7 +482,6 @@ def classify_error_direct(grading_result: dict, problem_text: str, solution_text
         response = get_claude().messages.create(
             model=MODEL_OPUS,
             max_tokens=2048,
-            temperature=0.0,
             tools=[TOOL_CLASSIFY_H],
             tool_choice={"type": "tool", "name": "classify_h_code"},
             messages=[{"role": "user", "content": prompt}],
@@ -734,7 +733,6 @@ def refine_endpoint():
         response = get_claude().messages.create(
             model=MODEL_HAIKU,
             max_tokens=1024,
-            temperature=0.0,
             tools=[TOOL_REFINE_TEXT],
             tool_choice={"type": "tool", "name": "refine_ocr_text"},
             system="정확한 텍스트 편집자. 자연어 지시를 정확히 반영합니다.",
@@ -836,7 +834,6 @@ def grade_endpoint():
         response = get_claude().messages.create(
             model=MODEL_OPUS,
             max_tokens=4096,
-            temperature=0.0,
             tools=[TOOL_GRADE_SOLUTION],
             tool_choice={"type": "tool", "name": "grade_student_solution"},
             system="수학 채점 전문가. 학생 풀이를 정확히 채점합니다.",
@@ -876,7 +873,6 @@ def grade_endpoint():
             response2 = get_claude().messages.create(
                 model=MODEL_OPUS,
                 max_tokens=4096,
-                temperature=0.0,
                 tools=[TOOL_GRADE_SOLUTION],
                 tool_choice={"type": "tool", "name": "grade_student_solution"},
                 system="수학 채점 전문가. 학생 풀이를 정확히 채점합니다.",
@@ -1044,7 +1040,6 @@ def generate_feedback(h_code: str, observed_errors: list, student_context: str) 
         response = get_claude().messages.create(
             model=MODEL_HAIKU,
             max_tokens=512,
-            temperature=0.3,
             tools=[TOOL_PERSONAL_FEEDBACK],
             tool_choice={"type": "tool", "name": "compose_feedback"},
             messages=[{"role": "user", "content": prompt}],
