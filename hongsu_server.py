@@ -961,8 +961,13 @@ def grade_endpoint():
         rubric_scores = grading.get("rubric_scores", [])
 
         # 감점형: 각 기준 score를 검증하고 total 재계산
+        # LLM이 rubric_scores 항목을 문자열로 뱉는 경우가 있어 dict만 처리
+        rubric_scores = [rs for rs in rubric_scores if isinstance(rs, dict)]
+        grading["rubric_scores"] = rubric_scores  # 정제된 리스트로 교체
+
         for rs in rubric_scores:
-            deductions = rs.get("deductions", [])
+            deductions = [d for d in (rs.get("deductions", []) or []) if isinstance(d, dict)]
+            rs["deductions"] = deductions  # 정제된 리스트로 교체
             deduction_sum = sum(d.get("points", 0) for d in deductions)  # 감점은 음수
             calculated = max(0, 25 + deduction_sum)  # 25 + (-감점합) = 남은 점수
             # LLM이 보고한 score와 계산값이 다르면 계산값 우선
