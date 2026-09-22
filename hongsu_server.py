@@ -461,8 +461,7 @@ def classify_error_direct(grading_result: dict, problem_text: str, solution_text
     """LLM이 H1~H10 판정기준을 직접 보고 분류."""
     try:
         steps = grading_result.get("steps", [])
-        wrong_steps = [s for s in steps if s.get("status") == "wrong"]
-
+        wrong_steps = [s for s in steps if isinstance(s, dict) and s.get("status") == "wrong"]
         if not wrong_steps:
             # wrong 없지만 H10은 별도 판정 대상 → 프롬프트에 넣어 판단시킴
             pass  # 이 경우도 아래 흐름으로 진입해서 h10_global만 확인
