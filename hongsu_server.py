@@ -474,7 +474,7 @@ def classify_error_direct(grading_result: dict, problem_text: str, solution_text
 
         wrong_desc = "\n".join([
             f"  Step {s['index']}: [{s['status']}] {s.get('text','')} — {s.get('explanation','')}"
-            for s in steps
+            for s in steps if isinstance(s, dict)
         ])
 
         prompt = p_classify.build(
