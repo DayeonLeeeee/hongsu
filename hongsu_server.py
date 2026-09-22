@@ -254,6 +254,8 @@ def _validate_grading_evidence(grading: dict, ocr_base: str) -> list:
         return []  # OCR 원문 없으면 검증 스킵
     failures = []
     for i, s in enumerate(grading.get("steps", []) or []):
+        if not isinstance(s, dict):
+            continue
         ev = s.get("evidence", "")
         if ev and not _evidence_in_text(ev, ocr_base):
             failures.append({
@@ -262,8 +264,12 @@ def _validate_grading_evidence(grading: dict, ocr_base: str) -> list:
                 "evidence": ev,
             })
     for i, r in enumerate(grading.get("rubric_scores", []) or []):
+        if not isinstance(r, dict):
+            continue
         # 감점형: 각 감점 내역의 evidence를 검증
         for j, d in enumerate(r.get("deductions", []) or []):
+            if not isinstance(d, dict):
+                continue
             ev = d.get("evidence", "")
             if ev and not _evidence_in_text(ev, ocr_base):
                 failures.append({
