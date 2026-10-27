@@ -8,6 +8,14 @@
   4. 개인화 피드백: Claude Haiku (tool_use)
   5. 모범답안
 
+[R v2 이식 — hongsu-rv2-1.0]
+  /grade      R v2 진단 (이용오 선생님 키트 로직): 줄별 ok/wrong/depends + R코드 + J수준
+              - 문항·코드북·줄별 기준판정·판정규칙은 전부 엑셀(materials/dataset_rv2.xlsx)에서 조립
+              - 문항별 허용 코드만 노출, 인용 원문 대조·허용 밖 코드 거부·1회 재시도, 기권(review_needed)
+              - 응답 원문·토큰·prompt_version·엑셀 해시를 모든 결과에 저장 (Supabase rv2_gradings)
+              - 피드백은 다음 단계 (이번 버전은 진단만)
+  /grade_h    기존 H코드 파이프라인 (Opus 채점·100점 루브릭 → H분류 → Haiku 피드백), 변경 없음
+  문항        기존 Q01~Q10 하드코딩 제거 → 엑셀 01_PROBLEMS(INV-R-01~10)로 교체
 """
 
 import os
@@ -45,6 +53,9 @@ from prompts import refine as p_refine
 from prompts import grading as p_grading
 from prompts import classify as p_classify
 from prompts import feedback as p_feedback
+from prompts import rv2 as p_rv2      # R v2 프롬프트 (키트 prompt_builder 이식본)
+import rv2_codebook                   # 엑셀 로더 (코드북·문항·기준판정·규칙)
+import rv2_grader                     # R v2 진단 실행·검증·재시도
 
 # 반복 오답 임계값 (미확정, 임의): 이 횟수 넘게 오답이면 정답 공개
 MAX_ATTEMPTS_BEFORE_REVEAL = 3
@@ -461,7 +472,8 @@ def classify_error_direct(grading_result: dict, problem_text: str, solution_text
     """LLM이 H1~H10 판정기준을 직접 보고 분류."""
     try:
         steps = grading_result.get("steps", [])
-        wrong_steps = [s for s in steps if isinstance(s, dict) and s.get("status") == "wrong"]
+        wrong_steps = [s for s in steps if s.get("status") == "wrong"]
+
         if not wrong_steps:
             # wrong 없지만 H10은 별도 판정 대상 → 프롬프트에 넣어 판단시킴
             pass  # 이 경우도 아래 흐름으로 진입해서 h10_global만 확인
@@ -474,7 +486,7 @@ def classify_error_direct(grading_result: dict, problem_text: str, solution_text
 
         wrong_desc = "\n".join([
             f"  Step {s['index']}: [{s['status']}] {s.get('text','')} — {s.get('explanation','')}"
-            for s in steps if isinstance(s, dict)
+            for s in steps
         ])
 
         prompt = p_classify.build(
@@ -762,8 +774,128 @@ def refine_endpoint():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
-# 엔드포인트 3: 채점
+# 엔드포인트 3-R: R v2 진단 (메인)
 @app.route("/grade", methods=["POST"])
+def grade_rv2_endpoint():
+    """
+    R v2 진단 — 이용오 선생님 키트(run_eval/prompt_builder) 로직의 서버 이식.
+
+    입력 (JSON):
+      problem_id      : 엑셀 01_PROBLEMS의 문항 ID (예: INV-R-01) — 필수
+      solution_steps  : [{index, text}] 학생이 확인한 OCR 단계 (권장)
+      solution_text   : 학생 답안 텍스트 (steps가 없을 때, 합성답안 실험용)
+      input_status    : confirmed(기본) | not_attempted | unreadable  (엑셀 02c 시트)
+      mode            : with_codebook(기본, 3단계) | grade_only(코드북 없이, 2단계 절제 실험용)
+      student_id, attempt_count : 선택
+    이미지만 보내면 400 — R v2는 학생/교사가 확인한 OCR 텍스트(input_status=confirmed)로 판정한다.
+    """
+    try:
+        data = request.get_json() or {}
+        problem_id = data.get("problem_id", "")
+        mode = data.get("mode", "with_codebook")
+        input_status = data.get("input_status", "confirmed")
+        attempt_count = int(data.get("attempt_count", 1))
+        student_id = data.get("student_id", "anonymous")
+
+        if mode not in ("with_codebook", "grade_only"):
+            return jsonify({"success": False, "error": f"mode 값 오류: {mode}"}), 400
+        if not rv2_codebook.has_problem(problem_id):
+            return jsonify({"success": False,
+                            "error": f"R v2 문항이 아님: {problem_id} (엑셀 01_PROBLEMS에 없음)"}), 400
+
+        answer_text = data.get("solution_text", "") or ""
+        if data.get("solution_steps"):
+            answer_text = rv2_grader.steps_to_answer_text(data["solution_steps"])
+        if not answer_text.strip() and data.get("solution_image_b64"):
+            return jsonify({"success": False,
+                            "error": "R v2는 확인된 OCR 텍스트로 채점합니다. /ocr → (/refine) 후 solution_steps로 보내세요."}), 400
+
+        answer_id = f"A-{now_iso().replace(':','').replace('-','').replace('.','')[:15]}-{problem_id}"
+        print(f"\n[R v2 진단] {answer_id} mode={mode} status={input_status}")
+
+        # 백지·판독 불가는 오류가 아니다 (판정 규칙 2) → LLM 호출 없이 기록
+        if input_status in ("not_attempted", "unreadable") or not answer_text.strip():
+            rec = {"problem_id": problem_id, "mode": mode, "model": None,
+                   "prompt_version": p_rv2.build_prompt(rv2_codebook.get(), problem_id, mode)["version"],
+                   "codebook_version": rv2_codebook.get().get("codebook_version"),
+                   "xlsx_sha8": rv2_codebook.get().get("xlsx_sha8"),
+                   "allowed_codes": rv2_codebook.allowed_codes(problem_id), "answer_text": answer_text,
+                   "ts": now_iso(), "raw_responses": [], "usage": {}, "n_calls": 0, "stop_reasons": [],
+                   "validation_issues": [], "error": None,
+                   "result": {"lines": [], "input_status": input_status if answer_text.strip() else "not_attempted",
+                              "main_error_code": None, "justification_level": None,
+                              "math_result_correct": None, "review_needed": False, "review_reason": ""}}
+        else:
+            rec = rv2_grader.diagnose(get_claude(), problem_id, answer_text, mode=mode)
+
+        res = rec.get("result") or {}
+        review_needed = bool(res.get("review_needed")) or bool(rec.get("validation_issues")) or bool(rec.get("error"))
+        if "max_tokens" in (rec.get("stop_reasons") or []):
+            review_needed = True
+
+        result = {
+            "success": rec.get("error") is None,
+            "answer_id": answer_id,
+            "problem_id": problem_id,
+            "student_id": student_id,
+            "attempt_count": attempt_count,
+            "mode": mode,
+            # ── R v2 진단 결과 ──
+            "input_status": res.get("input_status", input_status),
+            "lines": res.get("lines", []),
+            "main_error_code": res.get("main_error_code"),
+            "justification_level": res.get("justification_level"),
+            "math_result_correct": res.get("math_result_correct"),
+            "review_needed": review_needed,
+            "review_reason": res.get("review_reason", ""),
+            "validation_issues": rec.get("validation_issues", []),
+            "error": rec.get("error"),
+            # ── 재현성 필드 (README 규칙 5) ──
+            "prompt_version": rec.get("prompt_version"),
+            "codebook_version": rec.get("codebook_version"),
+            "xlsx_sha8": rec.get("xlsx_sha8"),
+            "allowed_codes": rec.get("allowed_codes"),
+            "model": rec.get("model"),
+            "timestamp": now_iso(),
+            "n_calls": rec.get("n_calls"),
+            "usage": rec.get("usage"),
+            "stop_reasons": rec.get("stop_reasons"),
+            # ── 기존 프론트 호환 ──
+            "is_correct": res.get("math_result_correct"),
+            "steps": rv2_grader.to_server_steps(res),
+            "feedback": {"feedback": "", "detailed_feedback": "", "next_focus": []},  # 피드백은 다음 단계
+        }
+
+        # 응답 원문 포함 전체 저장 (원문은 응답 JSON에는 싣지 않음 — 용량)
+        save_rv2_to_supabase({**result, "answer_text": rec.get("answer_text"),
+                              "raw_responses": rec.get("raw_responses")})
+
+        print(f"  [R v2 완료] main={result['main_error_code']} J={result['justification_level']} "
+              f"review={review_needed} calls={rec.get('n_calls')} issues={rec.get('validation_issues')}")
+        status = 200 if result["success"] else 502
+        return jsonify(result), status
+
+    except Exception as e:
+        print(f"  [R v2 에러] {traceback.format_exc()}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/admin/rv2/reload", methods=["POST"])
+def rv2_reload():
+    """엑셀을 다시 읽는다 (서버 재시작 없이 코드북·문항 갱신)."""
+    try:
+        mats = rv2_codebook.reload()
+        for p in rv2_codebook.problems_for_server_db():
+            p["created_at"] = now_iso()
+            _problems_db[p["id"]] = p
+        return jsonify({"success": True, "xlsx_sha8": mats["xlsx_sha8"],
+                        "problems": len(mats["problems"]), "r_codes": len(mats["r_codebook"])})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# 엔드포인트 3-H: 기존 H코드 채점 (변경 없음, 경로만 /grade → /grade_h)
+@app.route("/grade_h", methods=["POST"])
 def grade_endpoint():
     """
     Claude Opus vision — 학생 풀이 이미지를 보고 채점.
@@ -1109,7 +1241,10 @@ def master_solution_endpoint():
 
 @app.route("/health", methods=["GET"])
 def health():
-    return jsonify({"status": "ok", "time": now_iso(), "version": "v2"})
+    m = rv2_codebook.get()
+    return jsonify({"status": "ok", "time": now_iso(), "version": "v2+rv2",
+                    "rv2_model": rv2_grader.RV2_MODEL, "xlsx_sha8": m.get("xlsx_sha8"),
+                    "rv2_problems": len(m.get("problems", []))})
 
 
 # 관리자 웹 UI (브라우저에서 /admin 접속)
@@ -1184,19 +1319,21 @@ def measure_consistency_endpoint():
                 resp = c.post("/grade", json=data)
                 runs.append(resp.get_json())
 
-        # 통계 계산
-        primaries = [r["classification"]["primary_h"] for r in runs 
-             if r.get("success") and r["classification"].get("primary_h")]
+        # 통계 계산 (R v2: main_error_code·J 기준. 코드 없음(None)도 하나의 판정으로 셈)
         from collections import Counter
-        counter = Counter(primaries)
+        ok_runs = [r for r in runs if r.get("success")]
+        counter = Counter(str(r.get("main_error_code")) for r in ok_runs)
+        j_counter = Counter(str(r.get("justification_level")) for r in ok_runs)
         most_common, count = counter.most_common(1)[0] if counter else ("N/A", 0)
-
+        j_count = j_counter.most_common(1)[0][1] if j_counter else 0
 
         return jsonify({
             "success": True,
             "n_runs": n_runs,
             "code_consistency": round(count / n_runs, 4) if n_runs else 0,
+            "j_consistency": round(j_count / n_runs, 4) if n_runs else 0,
             "primary_distribution": dict(counter),
+            "j_distribution": dict(j_counter),
             "runs": runs,
             "timestamp": now_iso(),
         })
@@ -1214,6 +1351,26 @@ def measure_consistency_endpoint():
 _problems_db = {}   # id -> problem dict
 _results_db = {}    # id -> grading result dict
 _next_id = 1
+
+
+# ─── Supabase 저장: R v2 진단 (rv2_gradings 테이블, sql/rv2_gradings.sql) ───
+def save_rv2_to_supabase(r: dict):
+    """R v2 진단 1건 저장. 응답 원문(raw_responses)까지 저장. 실패해도 서버는 계속 동작."""
+    sb = get_supabase()
+    if not sb:
+        print("  [Supabase] 클라이언트 없음, R v2 저장 스킵")
+        return
+    keys = ["answer_id", "problem_id", "student_id", "attempt_count", "mode", "input_status",
+            "answer_text", "lines", "main_error_code", "justification_level", "math_result_correct",
+            "review_needed", "review_reason", "validation_issues", "error",
+            "prompt_version", "codebook_version", "xlsx_sha8", "allowed_codes", "model",
+            "n_calls", "usage", "stop_reasons", "raw_responses"]
+    row = {k: r.get(k) for k in keys}
+    try:
+        sb.table("rv2_gradings").insert(row).execute()
+        print(f"  [Supabase] rv2_gradings 저장 완료 ({r.get('answer_id')})")
+    except Exception as e:
+        print(f"  [Supabase] rv2_gradings 저장 실패: {e}")
 
 
 # ─── Supabase 저장 헬퍼 ───
@@ -1573,140 +1730,14 @@ def export_results_csv():
 # 교수님 문서 기반 문제 초기 등록 (서버 시작 시)
 
 def load_initial_problems():
-    """교수님 문서의 문항 1~10 초기 등록"""
-    initial = [
-        {
-            "id": "Q01", "unit": "함수", "type": "서술형",            "title": "대응 관계가 함수인지 판정하기",
-            "observation_points": "학생이 '모든 y가 쓰였는가'를 함수 조건으로 오해하는지, 또는 '서로 다른 x가 같은 y로 가면 안 된다'고 생각하는지 본다.",
-            "statement": "집합 X={1,2,3}, Y={a,b,c}에 대하여 두 대응 A, B가 있다.\nA: 1→a, 2→b, 3→b\nB: 1→a, 2→b와 2→c, 3→a\nA와 B가 각각 X에서 Y로의 함수인지 판정하고, 그 이유를 쓰시오.",
-            "correct_answer": "A는 함수, B는 함수가 아님",
-            "required_reasoning": "각 x가 Y의 원소 하나에만 대응하는지 확인한다.",
-            "expected_errors": ["H1", "H10"],
-            "model_answer": "A는 함수이다. X의 각 원소 1, 2, 3이 각각 Y의 원소 하나에만 대응한다. 2와 3이 같은 b에 대응해도 함수 조건에는 어긋나지 않는다. B는 함수가 아니다. 입력값 2가 b와 c 두 원소에 동시에 대응하므로 함수가 아니다.",
-            "feedback_example": "좋은 풀이는 A와 B를 각각 확인합니다. 특히 B에서는 입력값 2 하나만 자세히 보면 함수가 아닌 이유가 드러납니다.",
-            "rubric": [
-                {"criterion": "개념 사용", "description": "함수의 조건을 '각 입력에 출력이 오직 하나'로 제시한다."},
-                {"criterion": "근거 제시", "description": "A와 B에서 각 입력의 대응 여부를 각각 확인한다."},
-                {"criterion": "계산·표현", "description": "대응 기호 또는 문장으로 A, B의 차이를 명확히 표현한다."},
-                {"criterion": "결론", "description": "A는 함수, B는 함수 아님을 이유와 함께 쓴다."},
-            ],
-            "grading_rules": "함수 판정의 기본 조건(각 입력에 출력 오직 하나)을 확인했는지가 핵심이다.",
-            "concept_tags": ["함수", "대응"],
-            "score": 100,
-        },
-        {
-            "id": "Q02", "unit": "함수", "type": "서술형",            "title": "그래프가 함수인지 판정하기",
-            "observation_points": "'곡선이 하나라서 함수'라고 쓰면 H3 가능성이 높다. x=0 같은 구체적 값을 넣는지 확인한다.",
-            "statement": "좌표평면 위의 두 그래프 G1(y=x²-1)과 G2(x=y²-1)가 y를 x의 함수로 나타내는 그래프인지 판정하고, 판정 기준을 설명하시오.",
-            "correct_answer": "G1은 함수의 그래프, G2는 함수의 그래프가 아님",
-            "required_reasoning": "같은 x값에서 서로 다른 y값이 나오는지 확인한다.",
-            "expected_errors": ["H3", "H10"],
-            "model_answer": "G1은 y=x²-1이므로 임의의 x값에 대하여 y값이 하나로 정해져 함수의 그래프이다. G2는 x=y²-1이므로 예를 들어 x=0일 때 y=1 또는 y=-1이 가능하다. 같은 x값에 두 y값이 대응되므로 함수의 그래프가 아니다.",
-            "rubric": [
-                {"criterion": "개념 사용", "description": "그래프 판정 기준을 같은 x값에 대한 y값의 유일성으로 설명한다."},
-                {"criterion": "근거 제시", "description": "G2에서 x=0일 때 y가 두 값임을 예로 든다."},
-                {"criterion": "결론", "description": "G1은 함수의 그래프, G2는 아님을 명확히 쓴다."},
-            ],
-            "grading_rules": "수직선 판정 또는 구체적 x값 대입으로 판정했는지가 핵심이다.",
-            "concept_tags": ["함수의 그래프", "수직선 판정"],
-            "score": 100,
-        },
-        {
-            "id": "Q03", "unit": "함수", "type": "서술형",            "title": "정의역, 공역, 치역 구하기",
-            "observation_points": "공역 R을 그대로 치역으로 쓰는지, 중복값 0과 3을 처리하는지 본다.",
-            "statement": "함수 f:{-2,-1,0,1,2}→R가 f(x)=x²-1로 정의되어 있다. 이 함수의 정의역, 공역, 치역을 각각 구하고, 치역을 구한 과정을 쓰시오.",
-            "correct_answer": "정의역 {-2,-1,0,1,2}, 공역 R, 치역 {-1,0,3}",
-            "required_reasoning": "정의역 원소를 모두 대입하여 실제 함숫값의 집합을 만든다.",
-            "expected_errors": ["H2", "H10"],
-            "concept_tags": ["정의역", "공역", "치역"],
-            "score": 100,
-        },
-        {
-            "id": "Q04", "unit": "함수", "type": "서술형",            "title": "일대일함수와 일대일대응 판단하기",
-            "observation_points": "일대일함수라고 판단한 뒤 d가 남는다는 사실을 놓치면 H4로 본다.",
-            "statement": "함수 f:X→{a,b,c,d}에서 X={1,2,3}이고 f(1)=a, f(2)=b, f(3)=c이다. 이 함수가 일대일함수인지, 일대일대응인지 각각 판단하고 이유를 쓰시오.",
-            "correct_answer": "일대일함수이지만 일대일대응은 아님",
-            "required_reasoning": "서로 다른 입력이 서로 다른 출력으로 가는지, 치역과 공역이 같은지 확인한다.",
-            "expected_errors": ["H4", "H10"],
-            "concept_tags": ["일대일함수", "일대일대응"],
-            "score": 100,
-        },
-        {
-            "id": "Q05", "unit": "합성함수", "type": "서술형",            "title": "합성함수의 순서 설명하기",
-            "observation_points": "값만 계산하고 순서 설명을 안 하면 H10, 두 값을 같게 처리하면 H5가 주 코드.",
-            "statement": "두 함수 f(x)=2x-1, g(x)=x²+3에 대하여 (f∘g)(-2)와 (g∘f)(-2)를 각각 구하시오. 두 값이 달라지는 이유를 합성 순서와 관련하여 설명하시오.",
-            "correct_answer": "(f∘g)(-2)=13, (g∘f)(-2)=28",
-            "required_reasoning": "안쪽 함수가 먼저 적용되고 바깥 함수가 나중에 적용됨을 계산 과정에 드러낸다.",
-            "expected_errors": ["H5", "H10"],
-            "concept_tags": ["합성함수", "대응 순서"],
-            "score": 100,
-        },
-        {
-            "id": "Q06", "unit": "합성함수", "type": "서술형",            "title": "합성이 가능한 조건 판단하기",
-            "observation_points": "정의역·공역 조건 없이 수식 계산만 하면 H5 또는 H2가 나타날 수 있다.",
-            "statement": "함수 f:{1,2,3}→{4,5}, g:{4,5}→{0,1}. g∘f가 정의되는지 판단하고, (g∘f)(2)를 구하시오. 또한 f∘g가 정의되기 어려운 이유를 설명하시오.",
-            "correct_answer": "g∘f는 정의됨, (g∘f)(2)=1, f∘g는 정의 어려움",
-            "required_reasoning": "f의 출력이 g의 입력으로 들어갈 수 있는지 확인한다.",
-            "expected_errors": ["H5", "H2"],
-            "concept_tags": ["합성함수", "정의역", "공역"],
-            "score": 100,
-        },
-        {
-            "id": "Q07", "unit": "역함수", "type": "서술형",            "title": "역함수 존재 여부 판단하기",
-            "observation_points": "g(x)=x²에서 -1과 1을 비교하지 않으면 H6으로 본다.",
-            "statement": "두 함수 f:{1,2,3}→{2,4,6}, f(x)=2x와 g:{-1,0,1}→{0,1}, g(x)=x²가 있다. 각 함수의 역함수가 존재하는지 판단하고, 존재한다면 한 가지 역함숫값을 구하시오.",
-            "correct_answer": "f는 역함수 존재 (f⁻¹(6)=3), g는 존재하지 않음",
-            "required_reasoning": "각 함수가 일대일대응인지 확인한다.",
-            "expected_errors": ["H6", "H4"],
-            "concept_tags": ["역함수", "일대일대응"],
-            "score": 100,
-        },
-        {
-            "id": "Q08", "unit": "역함수", "type": "서술형",            "title": "역함수 식과 그래프 관계 설명하기",
-            "observation_points": "식 변형은 맞지만 그래프 설명이 빠지면 H10, 식 변형 오류는 H7, 대칭 설명 오류는 H8.",
-            "statement": "함수 f(x)=3x-2의 역함수를 구하고, 함수 y=f(x)의 그래프와 역함수의 그래프가 어떤 관계인지 설명하시오.",
-            "correct_answer": "f⁻¹(x)=(x+2)/3, y=x에 대하여 대칭",
-            "required_reasoning": "y=3x-2에서 x를 y에 대한 식으로 나타낸 뒤 x와 y를 바꾼다.",
-            "expected_errors": ["H7", "H8"],
-            "concept_tags": ["역함수", "그래프 대칭"],
-            "score": 100,
-        },
-        {
-            "id": "Q09", "unit": "유리함수", "type": "서술형",            "title": "유리함수의 정의역, 치역, 점근선 찾기",
-            "observation_points": "분모 0, 근호 안 조건, 점근선처럼 그래프 전에 확인해야 할 조건을 챙기는지 본다.",
-            "statement": "함수 h(x)=2/(x-1)+3의 정의역, 치역, 점근선을 구하고, 이 그래프가 y=2/x의 그래프에서 어떻게 이동한 것인지 설명하시오.",
-            "correct_answer": "정의역 x≠1, 치역 y≠3, 점근선 x=1, y=3, x축 방향 +1, y축 방향 +3",
-            "required_reasoning": "분모가 0이 되는 x값과 y가 될 수 없는 값을 확인한다.",
-            "expected_errors": ["H9", "H2", "H10"],
-            "concept_tags": ["유리함수", "점근선", "그래프 변환"],
-            "score": 100,
-        },
-        {
-            "id": "Q10", "unit": "역함수", "type": "서술형",            "title": "잘못된 풀이의 오류 설명 및 수정하기",
-            "observation_points": "정의역 제한을 언급하면 좋은 신호. 단순히 '틀렸다'만 쓰면 H10으로 본다.",
-            "statement": "다음 학생 풀이를 읽고 오류를 설명한 뒤, 올바르게 수정하시오.\n\n학생 풀이: 'y=x²의 역함수는 x=y²에서 x와 y를 바꾸면 y=x²이므로 다시 y=x²이다. 또는 양변에 제곱근을 씌워 y=√x라고 해도 된다. 따라서 y=x²의 역함수는 항상 존재한다.'",
-            "correct_answer": "정의역이 실수 전체인 y=x²은 일대일함수가 아니므로 역함수가 존재하지 않음. 정의역을 x≥0으로 제한해야 역함수 y=√x가 성립.",
-            "required_reasoning": "y=x²의 정의역이 실수 전체이면 일대일함수가 아님을 설명한다.",
-            "expected_errors": ["H6", "H7", "H10"],
-            "concept_tags": ["역함수", "정의역 제한", "일대일함수"],
-            "score": 100,
-        },
-    ]
-
-    for p in initial:
-        p["chapter"] = "함수와 그래프"
+    """엑셀 01_PROBLEMS(INV-R-01~10)를 초기 문제로 등록.
+    (기존 Q01~Q10 하드코딩은 제거 — 원본은 hongsu_server.orig.py 참고)"""
+    mats = rv2_codebook.get()
+    for p in rv2_codebook.problems_for_server_db():
         p["created_at"] = now_iso()
-        if "rubric" not in p:
-            p["rubric"] = []
-        if "model_answer" not in p:
-            p["model_answer"] = ""
-        if "feedback_example" not in p:
-            p["feedback_example"] = ""
-        if "grading_rules" not in p:
-            p["grading_rules"] = ""
         _problems_db[p["id"]] = p
-
-    print(f"  [초기 문제 등록] {len(initial)}개 문제 로드 완료")
+    print(f"  [초기 문제 등록] 엑셀 {len(mats['problems'])}개 문항 로드 "
+          f"(R코드 {len(mats['r_codebook'])}개, 기준판정 {len(mats['line_judgment'])}줄, x{mats['xlsx_sha8']})")
 
 
 # ─── 초기 문제 로드  ───
