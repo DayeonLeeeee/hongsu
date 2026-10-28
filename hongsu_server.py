@@ -9,7 +9,7 @@
   5. 모범답안
 
 [R v2 이식 — hongsu-rv2-1.0]
-  /grade      R v2 진단 (이용오 선생님 키트 로직): 줄별 ok/wrong/depends + R코드 + J수준
+  /grade      R v2 진단 (키트 로직): 줄별 ok/wrong/depends + R코드 + J수준
               - 문항·코드북·줄별 기준판정·판정규칙은 전부 엑셀(materials/dataset_rv2.xlsx)에서 조립
               - 문항별 허용 코드만 노출, 인용 원문 대조·허용 밖 코드 거부·1회 재시도, 기권(review_needed)
               - 응답 원문·토큰·prompt_version·엑셀 해시를 모든 결과에 저장 (Supabase rv2_gradings)
