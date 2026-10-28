@@ -1367,7 +1367,9 @@ def save_rv2_to_supabase(r: dict):
             "n_calls", "usage", "stop_reasons", "raw_responses"]
     row = {k: r.get(k) for k in keys}
     try:
-        sb.table("rv2_gradings").insert(row).execute()
+        # returning="minimal": RLS에서 insert만 허용(select 정책 없음)해도 저장되도록.
+        # 기본값(representation)은 저장한 행을 다시 읽어 오므로 select 권한이 없으면 RLS 오류가 난다.
+        sb.table("rv2_gradings").insert(row, returning="minimal").execute()
         print(f"  [Supabase] rv2_gradings 저장 완료 ({r.get('answer_id')})")
     except Exception as e:
         print(f"  [Supabase] rv2_gradings 저장 실패: {e}")
@@ -1760,4 +1762,4 @@ if __name__ == "__main__":
     print("=" * 60)
 
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False)  
+    app.run(host="0.0.0.0", port=port, debug=False)
