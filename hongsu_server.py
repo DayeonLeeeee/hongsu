@@ -14,6 +14,9 @@ hongsu 서버 (R v2)
 
 hongsu-rv2-1.1: 기존 H코드 체계(H1~H10 상수·분류·H 피드백·100점 루브릭 채점, /grade_h) 제거.
                 문항은 엑셀 01_PROBLEMS(INV-R-01~10)만 사용.
+hongsu-rv2-1.2: 코드북 R-v3 대응 — 진단 결과에 response_complete(요구 충족 여부)·
+                missing_criteria(대응 풀이가 없는 기준 번호) 추가, Supabase 저장 포함.
+                Supabase: sql/rv2_gradings_v12.sql 먼저 실행할 것.
 """
 
 import os
@@ -38,7 +41,7 @@ MATHPIX_APP_KEY = os.environ.get("MATHPIX_APP_KEY", "")
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
 
-# 진단 모델은 rv2_grader.RV2_MODEL (환경변수 RV2_MODEL, 기본 claude-opus-4-6). 아래는 OCR·수정용.
+# 진단 모델은 rv2_grader.RV2_MODEL (환경변수 RV2_MODEL, 기본 claude-haiku-4-5). 아래는 OCR·수정용.
 MODEL_HAIKU  = "claude-haiku-4-5-20251001"
 MODEL_GEMINI = "gemini-2.5-flash"
 
@@ -397,7 +400,8 @@ def grade_rv2_endpoint():
                    "validation_issues": [], "error": None,
                    "result": {"lines": [], "input_status": input_status if answer_text.strip() else "not_attempted",
                               "main_error_code": None, "justification_level": None,
-                              "math_result_correct": None, "review_needed": False, "review_reason": ""}}
+                              "math_result_correct": None, "review_needed": False, "review_reason": "",
+                              "response_complete": None, "missing_criteria": []}}
         else:
             rec = rv2_grader.diagnose(get_claude(), problem_id, answer_text, mode=mode)
 
@@ -421,6 +425,8 @@ def grade_rv2_endpoint():
             "math_result_correct": res.get("math_result_correct"),
             "review_needed": review_needed,
             "review_reason": res.get("review_reason", ""),
+            "response_complete": res.get("response_complete"),       # R-v3 규칙 12: False면 미완 답안
+            "missing_criteria": res.get("missing_criteria", []),      # 대응 풀이가 없는 기준 번호 (코드 아님, 피드백용)
             "validation_issues": rec.get("validation_issues", []),
             "error": rec.get("error"),
             # ── 재현성 필드 (README 규칙 5) ──
@@ -445,6 +451,7 @@ def grade_rv2_endpoint():
                               "raw_responses": rec.get("raw_responses")})
 
         print(f"  [R v2 완료] main={result['main_error_code']} J={result['justification_level']} "
+              f"complete={result['response_complete']} missing={result['missing_criteria']} "
               f"review={review_needed} calls={rec.get('n_calls')} issues={rec.get('validation_issues')}")
         status = 200 if result["success"] else 502
         return jsonify(result), status
@@ -514,8 +521,9 @@ def master_solution_endpoint():
 @app.route("/health", methods=["GET"])
 def health():
     m = rv2_codebook.get()
-    return jsonify({"status": "ok", "time": now_iso(), "version": "hongsu-rv2-1.1",
+    return jsonify({"status": "ok", "time": now_iso(), "version": "hongsu-rv2-1.2",
                     "rv2_model": rv2_grader.RV2_MODEL, "xlsx_sha8": m.get("xlsx_sha8"),
+                    "codebook_version": m.get("codebook_version"),
                     "rv2_problems": len(m.get("problems", []))})
 
 
@@ -634,8 +642,8 @@ def save_rv2_to_supabase(r: dict):
         return
     keys = ["answer_id", "problem_id", "student_id", "attempt_count", "mode", "input_status",
             "answer_text", "lines", "main_error_code", "justification_level", "math_result_correct",
-            "review_needed", "review_reason", "validation_issues", "error",
-            "prompt_version", "codebook_version", "xlsx_sha8", "allowed_codes", "model",
+            "review_needed", "review_reason", "response_complete", "missing_criteria",
+            "validation_issues", "error", "prompt_version", "codebook_version", "xlsx_sha8", "allowed_codes", "model",
             "n_calls", "usage", "stop_reasons", "raw_responses"]
     row = {k: r.get(k) for k in keys}
     try:
@@ -765,6 +773,8 @@ def save_result():
         "main_error_code": data.get("main_error_code"),
         "justification_level": data.get("justification_level"),
         "review_needed": data.get("review_needed", False),
+        "response_complete": data.get("response_complete"),
+        "missing_criteria": data.get("missing_criteria", []),
         "input_status": data.get("input_status", ""),
         "lines": data.get("lines", []),
         "steps": data.get("steps", []),
