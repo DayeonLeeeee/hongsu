@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-rv2_codebook.py — R v2 자료(오세준 교수님 엑셀)를 서버 시작 시 직접 읽는다.
+rv2_codebook.py — R 코드북 자료(오세준 교수님 엑셀)를 서버 시작 시 직접 읽는다.
+
+hongsu-rv2-1.2: codebook_version을 하드코딩("R-v2")하지 않고 엑셀 00_README의 '코드북' 행에서 읽는다
+                (R-v3 엑셀을 넣으면 기록에도 R-v3가 남는다).
 
 원칙 (README 이식 규칙 1·2):
   - 코드북·문항·줄별 기준판정·판정규칙은 전부 엑셀에서 읽는다. 서버 코드에 하드코딩하지 않는다.
@@ -24,6 +27,8 @@ SHEETS = {
     "line_judgment": "06_LINE_JUDGMENT",
     "prompt_rules": "09_PROMPT_RULES",
 }
+
+README_SHEET = "00_README"
 
 _mats = None
 
@@ -50,6 +55,18 @@ def _read_sheet(wb, name: str) -> list:
     return out
 
 
+def _codebook_version(wb) -> str:
+    """00_README 시트의 '코드북' 행(예: 'R-v3 · 내용 오류 R1–R11 …')에서 버전 문자열을 뽑는다."""
+    if README_SHEET not in wb.sheetnames:
+        return "unknown"
+    for row in wb[README_SHEET].iter_rows(values_only=True):
+        if row and _cell(row[0]).strip() == "코드북" and len(row) > 1:
+            m = re.search(r"R-v\d+", _cell(row[1]))
+            if m:
+                return m.group(0)
+    return "unknown"
+
+
 def load(path: str = None) -> dict:
     """엑셀을 읽어 키트 materials.json과 같은 구조의 dict를 만든다."""
     import openpyxl
@@ -61,8 +78,8 @@ def load(path: str = None) -> dict:
     if missing:
         raise ValueError(f"엑셀에 필요한 시트가 없음: {missing}")
     mats = {key: _read_sheet(wb, sheet) for key, sheet in SHEETS.items()}
+    mats["codebook_version"] = _codebook_version(wb)
     wb.close()
-    mats["codebook_version"] = "R-v2"
     mats["xlsx_sha8"] = digest          # 재현성: 어떤 엑셀로 채점했는지
     mats["xlsx_path"] = path
     return mats
@@ -118,7 +135,7 @@ def problems_for_server_db() -> list:
             "required_reasoning": p.get("required_evidence", ""),
             "expected_errors": re.findall(r"R\d+", p.get("주_R코드", "")),
             "source": p.get("출처", ""),
-            "codebook": "R-v2",
+            "codebook": get().get("codebook_version"),
             "concept_tags": ["역함수"],
             "chapter": "함수와 그래프",
             "score": 100,
