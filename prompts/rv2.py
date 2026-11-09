@@ -9,6 +9,13 @@ prompts/rv2.py — R v2 자료(엑셀)에서 문항별 채점 프롬프트를 �
       (실험에서 Opus가 JSON 앞 수식 중괄호 때문에 파싱 실패한 사례가 있어, 구조화 출력으로 원천 차단)
   나머지 프롬프트 문구·규칙·순서는 키트와 동일.
 
+hongsu-rv2-1.2 (코드북 R-v3, 2026-10-30 오세준 교수님 승인본 대응):
+  - 출력에 response_complete(요구 항목을 다 썼는지)·missing_criteria(대응 풀이가 없는 기준 번호) 추가
+    (R-v3 판정 규칙 12 — 미완 답안을 wrong 대신 기록할 칸)
+  - 판정 절차에 '안 쓴 기준' 처리 단계 추가 (인용할 원문이 없는 누락을 wrong 줄로 만들지 않음)
+  - C-3 적용 범위를 R-v3 판정 규칙 11에 맞춰 '결론이 옳은 답안'으로 한정
+  - prompt_version의 코드북 버전을 하드코딩 대신 엑셀(rv2_codebook)에서 읽음
+
 --- 아래는 키트 원본 설명 ---
 prompt_builder.py — R v2 자료(materials.json)에서 문항별 채점 프롬프트를 조립한다.
 
@@ -29,9 +36,9 @@ prompt_builder.py — R v2 자료(materials.json)에서 문항별 채점 프롬�
 import re
 
 
-CODEBOOK_VERSION = "R-v2"
+CODEBOOK_VERSION = "R-v2"             # 엑셀에 버전이 없을 때만 쓰는 기본값 (실제 값은 mats["codebook_version"])
 BUILDER_VERSION = "kit-1.2-20261022"  # v1.2: 33건 개발셋 교정 패치 (J 6규칙, C-1~C-5)
-PORT_VERSION = "hongsu-rv2-1.0"       # hongsu 이식본 버전
+PORT_VERSION = "hongsu-rv2-1.2"       # hongsu 이식본 버전 (1.2: R-v3 규칙 11·12 대응)
 
 # v1.2 패치 — 33건 개발셋(전문가 라벨)으로 교정된 추가 판정 규칙.
 # 주의: 사후 적합된 규칙이므로 홀드아웃(신규 합성답안)에서 검증 전까지는 잠정.
@@ -41,9 +48,10 @@ C-1 (R1/R5 경계): '한 입력에 두 값' 문제를 인지하고 다루다가 
 C-2 (± 처리): ±를 최종 답으로 제시하면 R6. 기준 풀이의 중간 단계와 일치하는 ±는 ok.
     중단된 답안은 쓰인 줄까지만 판정하고, 쓰인 줄이 모두 옳으면 코드 없이
     미완(response_complete=false)으로만 기록한다.
-C-3 (근거 부재는 코드가 아님): 이 원칙이 기준 판정표의 개별 문구에 우선한다.
-    반례·근거 없이 결론만 쓴 답안은 코드 없음(J와 요구충족으로만 기록).
+C-3 (근거 부재는 코드가 아님): 결론이 옳은 답안에 한해, 이 원칙이 기준 판정표의 개별 문구에 우선한다.
+    옳은 결론을 반례·근거 없이 쓴 답안은 코드 없음(J와 요구충족으로만 기록).
     반례를 세우려다 틀린 경우에만 해당 코드를 부여한다.
+    결론 자체가 틀린 답안(예: '잘못된 곳이 없다')은 근거 부재가 아니라 내용 오류다 (판정 규칙 11).
 C-4 (대안 정답): 문항 정답에 괄호로 명시된 대안 결론도 정답으로 인정한다.
 C-5 (복수 후보): 한 줄에 코드가 둘 이상 성립하면 기준 판정표 해당 줄의 규칙을
     main으로 하고 나머지는 code_candidates에 병기한다.
@@ -143,12 +151,14 @@ SCHEMA_WITH_CODEBOOK = """{
             "judgment": "ok|wrong|depends", "code": "R코드 또는 null",
             "quote": "wrong이면 원문 인용, 아니면 null",
             "reason": "판정 근거 한 문장", "depends_on": 원인 줄 번호 또는 null}],
- "main_error_code": "첫 독립 wrong 줄의 R코드, 없으면 null",
+ "main_error_code": "첫 독립 wrong 줄(wrong 줄이 없으면 오류인 누락 기준)의 R코드, 없으면 null",
  "justification_level": "J0|J1|J2|not_applicable",
  "math_result_correct": true,
  "input_status": "confirmed|not_attempted|unreadable",
  "review_needed": false,
- "review_reason": ""
+ "review_reason": "",
+ "response_complete": true 또는 false (문항의 요구 항목을 모두 썼으면 true),
+ "missing_criteria": [대응하는 학생 풀이가 없는 기준 번호들, 없으면 []]
 }"""
 
 
@@ -176,12 +186,17 @@ def tool_schema(mode: str) -> dict:
     if mode == "with_codebook":
         line_props["code"] = {"type": ["string", "null"], "description": "R코드 또는 null"}
         props.update({
-            "main_error_code": {"type": ["string", "null"], "description": "첫 독립 wrong 줄의 R코드, 없으면 null"},
+            "main_error_code": {"type": ["string", "null"], "description": "첫 독립 wrong 줄(wrong 줄이 없으면 오류인 누락 기준)의 R코드, 없으면 null"},
             "justification_level": {"type": "string", "enum": ["J0", "J1", "J2", "not_applicable"]},
             "review_needed": {"type": "boolean"},
             "review_reason": {"type": "string"},
+            "response_complete": {"type": "boolean",
+                                  "description": "문항의 요구 항목을 모두 썼으면 true, 중단·누락이 있으면 false"},
+            "missing_criteria": {"type": "array", "items": {"type": "integer"},
+                                 "description": "대응하는 학생 풀이가 없는 기준 번호 (코드 아님, 피드백용). 없으면 []"},
         })
-        required += ["main_error_code", "justification_level", "review_needed"]
+        required += ["main_error_code", "justification_level", "review_needed",
+                     "response_complete", "missing_criteria"]
     else:
         props["notes"] = {"type": "string"}
     props["lines"] = {"type": "array", "items": {"type": "object", "properties": line_props,
@@ -230,7 +245,11 @@ def build_prompt(mats: dict, problem_id: str, mode: str = "with_codebook") -> di
         steps += [
             "3) wrong 줄에는 원문 인용과 함께 코드 부여."
             " 기준 판정표로 설명되지 않는 오류는 코드를 억지로 고르지 말고 review_needed=true",
-            "4) 풀이 전체의 근거 수준(J) 판정",
+            "4) 학생 풀이가 대응하지 않는 기준은 wrong 줄로 만들지 말고 missing_criteria에 기준 번호를 적는다"
+            " (인용할 원문이 없으므로). 그 누락이 기준 판정표의 'wrong일 때'에 해당하는 오류이면"
+            " 그 코드를 main_error_code에 적고, 그렇지 않은 누락·중단은 코드 없이"
+            " response_complete=false로만 기록한다 (판정 규칙 12)",
+            "5) 풀이 전체의 근거 수준(J) 판정",
         ]
         schema = SCHEMA_WITH_CODEBOOK
     else:
@@ -243,7 +262,8 @@ def build_prompt(mats: dict, problem_id: str, mode: str = "with_codebook") -> di
     return {
         "system": system,
         "user_template": "\n\n".join(parts),
-        "version": f"{CODEBOOK_VERSION}-{mode}-{BUILDER_VERSION}-{PORT_VERSION}-x{mats.get('xlsx_sha8', 'na')}",
+        "version": f"{mats.get('codebook_version') or CODEBOOK_VERSION}-{mode}-{BUILDER_VERSION}"
+                   f"-{PORT_VERSION}-x{mats.get('xlsx_sha8', 'na')}",
         "allowed_codes": codes,
         "problem_id": problem_id,
     }
