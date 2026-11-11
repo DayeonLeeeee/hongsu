@@ -2,7 +2,7 @@
 """
 prompts/rv2.py — R v2 자료(엑셀)에서 문항별 채점 프롬프트를 조립한다. (hongsu 이식본)
 
-이용오 선생님 키트 prompt_builder.py(kit-1.2-20261022)를 그대로 옮긴 것.
+이용오 교수님 키트 prompt_builder.py(kit-1.2-20261022)를 그대로 옮긴 것.
 차이는 두 가지뿐:
   (1) 자료 출처: materials.json 대신 rv2_codebook.get() (서버 시작 시 엑셀 직접 로드, 구조 동일)
   (2) 출력 방식: "JSON만 출력" 지시 대신 rv2_diagnose tool_use 강제
@@ -13,6 +13,10 @@ hongsu-rv2-1.2 (코드북 R-v3, 2026-10-30 오세준 교수님 승인본 대응)
   - 출력에 response_complete(요구 항목을 다 썼는지)·missing_criteria(대응 풀이가 없는 기준 번호) 추가
     (R-v3 판정 규칙 12 — 미완 답안을 wrong 대신 기록할 칸)
   - 판정 절차에 '안 쓴 기준' 처리 단계 추가 (인용할 원문이 없는 누락을 wrong 줄로 만들지 않음)
+hongsu-rv2-1.2.1 (2026-11-11):
+  - 판정 절차 4번에서 "그 누락이 기준표상 오류이면 그 코드를 main_error_code에 적는다" 문장을 제거.
+    R-v3 승인 문구(규칙 12: missing_criteria는 코드가 아닌 피드백용 표시)에 없는, 연구팀이 임의로 추가한
+    판정 기준이었으므로 교수님 확인 전까지 승인 문구대로 되돌림. main_error_code 설명도 원래대로.
   - C-3 적용 범위를 R-v3 판정 규칙 11에 맞춰 '결론이 옳은 답안'으로 한정
   - prompt_version의 코드북 버전을 하드코딩 대신 엑셀(rv2_codebook)에서 읽음
 
@@ -38,7 +42,7 @@ import re
 
 CODEBOOK_VERSION = "R-v2"             # 엑셀에 버전이 없을 때만 쓰는 기본값 (실제 값은 mats["codebook_version"])
 BUILDER_VERSION = "kit-1.2-20261022"  # v1.2: 33건 개발셋 교정 패치 (J 6규칙, C-1~C-5)
-PORT_VERSION = "hongsu-rv2-1.2"       # hongsu 이식본 버전 (1.2: R-v3 규칙 11·12 대응)
+PORT_VERSION = "hongsu-rv2-1.2.1"     # hongsu 이식본 버전 (1.2: R-v3 규칙 11·12 대응 / 1.2.1: 승인 문구에 없는 누락 코드 부여 문장 제거)
 
 # v1.2 패치 — 33건 개발셋(전문가 라벨)으로 교정된 추가 판정 규칙.
 # 주의: 사후 적합된 규칙이므로 홀드아웃(신규 합성답안)에서 검증 전까지는 잠정.
@@ -151,7 +155,7 @@ SCHEMA_WITH_CODEBOOK = """{
             "judgment": "ok|wrong|depends", "code": "R코드 또는 null",
             "quote": "wrong이면 원문 인용, 아니면 null",
             "reason": "판정 근거 한 문장", "depends_on": 원인 줄 번호 또는 null}],
- "main_error_code": "첫 독립 wrong 줄(wrong 줄이 없으면 오류인 누락 기준)의 R코드, 없으면 null",
+ "main_error_code": "첫 독립 wrong 줄의 R코드, 없으면 null",
  "justification_level": "J0|J1|J2|not_applicable",
  "math_result_correct": true,
  "input_status": "confirmed|not_attempted|unreadable",
@@ -186,7 +190,7 @@ def tool_schema(mode: str) -> dict:
     if mode == "with_codebook":
         line_props["code"] = {"type": ["string", "null"], "description": "R코드 또는 null"}
         props.update({
-            "main_error_code": {"type": ["string", "null"], "description": "첫 독립 wrong 줄(wrong 줄이 없으면 오류인 누락 기준)의 R코드, 없으면 null"},
+            "main_error_code": {"type": ["string", "null"], "description": "첫 독립 wrong 줄의 R코드, 없으면 null"},
             "justification_level": {"type": "string", "enum": ["J0", "J1", "J2", "not_applicable"]},
             "review_needed": {"type": "boolean"},
             "review_reason": {"type": "string"},
@@ -246,9 +250,7 @@ def build_prompt(mats: dict, problem_id: str, mode: str = "with_codebook") -> di
             "3) wrong 줄에는 원문 인용과 함께 코드 부여."
             " 기준 판정표로 설명되지 않는 오류는 코드를 억지로 고르지 말고 review_needed=true",
             "4) 학생 풀이가 대응하지 않는 기준은 wrong 줄로 만들지 말고 missing_criteria에 기준 번호를 적는다"
-            " (인용할 원문이 없으므로). 그 누락이 기준 판정표의 'wrong일 때'에 해당하는 오류이면"
-            " 그 코드를 main_error_code에 적고, 그렇지 않은 누락·중단은 코드 없이"
-            " response_complete=false로만 기록한다 (판정 규칙 12)",
+            " (인용할 원문이 없으므로). 중단·누락 답안은 판정 규칙 12에 따라 기록한다",
             "5) 풀이 전체의 근거 수준(J) 판정",
         ]
         schema = SCHEMA_WITH_CODEBOOK
