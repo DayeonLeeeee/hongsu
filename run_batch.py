@@ -53,7 +53,7 @@ def grade_remote(url: str, row: dict) -> dict:
                    "input_status", "review_needed", "review_reason", "response_complete", "missing_criteria"]
     return {
         "model": d.get("model"), "prompt_version": d.get("prompt_version"),
-        "grader_version": d.get("grader_version"),
+        "grader_version": d.get("grader_version"), "response_models": d.get("response_models"),
         "codebook_version": d.get("codebook_version"), "xlsx_sha8": d.get("xlsx_sha8"),
         "allowed_codes": d.get("allowed_codes"), "usage": d.get("usage"), "n_calls": d.get("n_calls"),
         "stop_reasons": d.get("stop_reasons"), "validation_issues": d.get("validation_issues"),

@@ -195,7 +195,7 @@ class FakeClient:
     def _create(self, **kw):
         self.calls.append(kw)
         blocks = self.responses.pop(0)
-        return SimpleNamespace(content=blocks, stop_reason="end_turn",
+        return SimpleNamespace(content=blocks, stop_reason="end_turn", model=kw.get("model"),
                                usage=SimpleNamespace(input_tokens=10, output_tokens=5,
                                                      cache_creation_input_tokens=0,
                                                      cache_read_input_tokens=0))
@@ -300,3 +300,37 @@ def test_outcome_blank_and_error():
     r["input_status"] = "not_attempted"
     assert g.classify_outcome(_rec(r)) == ("not_attempted", [])
     assert g.classify_outcome(_rec(None, error="boom")) == ("error", ["error"])
+
+
+# ── 모델별 기본값 ─────────────────────────────────────────
+
+def test_default_model_is_opus_5_5_with_auto_and_no_temperature(monkeypatch):
+    for k in ("RV2_MODEL", "RV2_TOOL_CHOICE", "RV2_TEMPERATURE"):
+        monkeypatch.delenv(k, raising=False)
+    import importlib
+    mod = importlib.reload(g)
+    assert mod.RV2_MODEL == "claude-opus-5-5"
+    c = FakeClient([[_tool_block(good())]])
+    rec = mod.diagnose(c, PID, ANSWER)
+    assert c.calls[0]["model"] == "claude-opus-5-5"
+    assert c.calls[0]["tool_choice"] == {"type": "auto"}
+    assert "temperature" not in c.calls[0]
+    assert rec["model"] == "claude-opus-5-5" and rec["response_models"] == ["claude-opus-5-5"]
+
+
+def test_explicit_older_model_uses_its_defaults():
+    c = FakeClient([[_tool_block(good())]])
+    g.diagnose(c, PID, ANSWER, model="claude-haiku-4-5")
+    assert c.calls[0]["tool_choice"]["type"] == "tool"
+    assert c.calls[0]["temperature"] == 0.0
+
+
+def test_env_override(monkeypatch):
+    monkeypatch.setenv("RV2_MODEL", "claude-opus-5-5")
+    monkeypatch.setenv("RV2_TOOL_CHOICE", "tool")
+    monkeypatch.setenv("RV2_TEMPERATURE", "0.0")
+    import importlib
+    mod = importlib.reload(g)
+    assert mod.RV2_TOOL_CHOICE == "tool" and mod.RV2_TEMPERATURE == 0.0
+    monkeypatch.delenv("RV2_TOOL_CHOICE"); monkeypatch.delenv("RV2_TEMPERATURE")
+    importlib.reload(g)

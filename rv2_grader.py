@@ -24,10 +24,10 @@ hongsu-rv2-1.3 (안정화):
   - rec["extraction"]: 호출마다 결과를 어디서 읽었는지(tool/text/none) 기록 — 스키마 안정성 측정용.
 
 환경변수:
-  RV2_MODEL        기본 claude-haiku-4-5 (11/8 미팅 결정: Stage 3는 Haiku로 진행. 이전 기본값 claude-opus-4-6)
+  RV2_MODEL        기본 claude-opus-5-5 (11/24 결정. 이전: claude-haiku-4-5 ← 11/8, claude-opus-4-6)
   RV2_MAX_TOKENS   기본 8000 (실험에서 2000은 thinking 모델이 잘림)
-  RV2_TEMPERATURE  기본 0.0, "none"이면 전송 안 함 (Fable 5처럼 temperature를 거부하는 모델용)
-  RV2_TOOL_CHOICE  기본 "tool"(도구 호출 강제), "auto"면 강제하지 않음 (Opus 5.5처럼 강제를 거부하는 모델용)
+  RV2_TEMPERATURE  지정 안 하면 모델별 기본값(MODEL_DEFAULTS). "none"이면 전송 안 함
+  RV2_TOOL_CHOICE  지정 안 하면 모델별 기본값. "tool"=도구 호출 강제, "auto"=강제 안 함
 """
 import datetime
 import json
@@ -37,16 +37,42 @@ import re
 import rv2_codebook
 from prompts import rv2 as p_rv2
 
-RV2_MODEL = os.environ.get("RV2_MODEL", "claude-haiku-4-5")
+# 모델별 호출 기본값 (11/11 모델 비교 실험에서 확인한 제약).
+#   tool_choice: 도구 호출 강제를 거부하는 모델은 "auto"
+#   temperature: temperature를 받지 않는 모델은 None(전송 안 함)
+MODEL_DEFAULTS = {
+    "claude-opus-5-5":  {"tool_choice": "auto", "temperature": None},
+    "claude-haiku-5-5": {"tool_choice": "tool", "temperature": None},
+    "claude-opus-4-6":  {"tool_choice": "tool", "temperature": 0.0},
+    "claude-haiku-4-5": {"tool_choice": "tool", "temperature": 0.0},
+}
+_FALLBACK_DEFAULTS = {"tool_choice": "tool", "temperature": 0.0}
+
+
+def model_defaults(model: str) -> dict:
+    """모델 ID(날짜 접미사 포함)에 맞는 호출 기본값."""
+    for k, v in MODEL_DEFAULTS.items():
+        if model == k or model.startswith(k + "-"):
+            return v
+    return _FALLBACK_DEFAULTS
+
+
+RV2_MODEL = os.environ.get("RV2_MODEL", "claude-opus-5-5")
 RV2_MAX_TOKENS = int(os.environ.get("RV2_MAX_TOKENS", "8000"))
-_t = os.environ.get("RV2_TEMPERATURE", "0.0")
-RV2_TEMPERATURE = None if _t.lower() == "none" else float(_t)
+_defaults = model_defaults(RV2_MODEL)
+
+_t = os.environ.get("RV2_TEMPERATURE")
+if _t is None:
+    RV2_TEMPERATURE = _defaults["temperature"]
+else:
+    RV2_TEMPERATURE = None if _t.strip().lower() == "none" else float(_t)
+
+RV2_TOOL_CHOICE = (os.environ.get("RV2_TOOL_CHOICE") or _defaults["tool_choice"]).strip().lower()
+if RV2_TOOL_CHOICE not in ("tool", "auto"):
+    RV2_TOOL_CHOICE = _defaults["tool_choice"]
+
 # 채점 동작(정제·검증·재시도 로직) 버전. 프롬프트가 같아도 이 값이 다르면 결과를 직접 비교하지 않는다.
 GRADER_VERSION = "rv2-grader-1.3"
-
-RV2_TOOL_CHOICE = os.environ.get("RV2_TOOL_CHOICE", "tool").strip().lower()
-if RV2_TOOL_CHOICE not in ("tool", "auto"):
-    RV2_TOOL_CHOICE = "tool"
 
 USAGE_KEYS = ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
 
@@ -330,7 +356,7 @@ def _call(client, model, system, user, tool, max_tokens, temperature, tool_choic
     usage = {k: (getattr(u, k, 0) or 0) for k in USAGE_KEYS}
     parsed, source = extract_result(getattr(resp, "content", []))
     raw = {"stop_reason": resp.stop_reason, "usage": usage, "content": _dump_content(resp),
-           "extraction": source, "ts": _now()}
+           "extraction": source, "model": getattr(resp, "model", None), "ts": _now()}
     return parsed, raw
 
 
@@ -341,7 +367,11 @@ def diagnose(client, problem_id: str, answer_text: str, mode: str = "with_codebo
     assert mode in ("grade_only", "with_codebook")
     model = model or RV2_MODEL
     max_tokens = max_tokens or RV2_MAX_TOKENS
-    temperature = RV2_TEMPERATURE if temperature == "default" else temperature
+    # 서버 기본 모델이면 환경변수 반영값, 다른 모델을 직접 지정했으면 그 모델의 기본값
+    md = ({"tool_choice": RV2_TOOL_CHOICE, "temperature": RV2_TEMPERATURE} if model == RV2_MODEL
+          else model_defaults(model))
+    temperature = md["temperature"] if temperature == "default" else temperature
+    tool_choice = tool_choice or md["tool_choice"]
     with_codes = mode == "with_codebook"
     mats = rv2_codebook.get()
 
@@ -359,7 +389,8 @@ def diagnose(client, problem_id: str, answer_text: str, mode: str = "with_codebo
         "answer_text": answer_text, "max_tokens": max_tokens, "temperature": temperature,
         "ts": _now(), "raw_responses": [], "usage": {k: 0 for k in USAGE_KEYS},
         "n_calls": 0, "stop_reasons": [], "result": None, "validation_issues": [], "error": None,
-        "tool_choice": tool_choice or RV2_TOOL_CHOICE,
+        "tool_choice": tool_choice,
+        "response_models": [],     # API가 실제로 응답한 모델 ID (요청한 model과 일치하는지 확인용)
         "extraction": [],          # 호출마다 tool / text / none
         "first_issues": [],        # 첫 호출의 정제·검증 사유 (재시도로 해결됐어도 기록 — 안정성 측정용)
     }
@@ -371,6 +402,7 @@ def diagnose(client, problem_id: str, answer_text: str, mode: str = "with_codebo
         rec["n_calls"] += 1
         rec["stop_reasons"].append(raw["stop_reason"])
         rec["extraction"].append(raw["extraction"])
+        rec["response_models"].append(raw.get("model"))
         for k in USAGE_KEYS:
             rec["usage"][k] += raw["usage"].get(k, 0)
         return parsed, raw["stop_reason"]
