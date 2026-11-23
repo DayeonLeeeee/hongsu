@@ -171,12 +171,13 @@ TOOL_NAME = "rv2_diagnose"
 # 되돌리려면 아래 줄을 FORMAT_RULES의 "- lines의 각 원소는 …" 바로 다음 줄에 그대로 넣고 PORT_VERSION을 올린다.
 # 변경 이력을 정리할 때 반드시 함께 보고할 것.
 # - 학생 답안의 줄 하나 = lines 원소 하나.
+# - (같은 이유로 제외) 여러 줄을 한 원소에 합치지 않는다.  ← "lines의 각 원소는 …" 규칙 끝에 붙어 있던 문장
 FORMAT_RULES = """<출력 형식 규칙>
-- lines의 각 원소는 반드시 위 구조의 객체 하나다. 줄을 문자열로 요약하거나 여러 줄을 한 원소에 합치지 않는다.
+- lines의 각 원소는 반드시 위 구조의 객체다. 줄을 문자열로 요약해 넣지 않는다.
 - true/false는 따옴표 없는 불리언으로 쓴다 ("true" 같은 문자열 금지).
-- 값이 없으면 null을 쓴다 ("null", "없음", "" 같은 문자열 금지).
+- 필드에 값이 없으면 null을 쓴다 ("null" 같은 문자열 금지). 학생 답안을 인용할 때는 학생이 쓴 글자 그대로 쓴다.
 - judgment는 ok, wrong, depends 중 하나를 소문자로 쓴다.
-- no, matched_criterion, depends_on, missing_criteria의 원소는 정수로 쓴다 (①, "3" 금지).
+- 번호 필드(no, matched_criterion, depends_on, missing_criteria의 원소)는 정수로 쓴다 (①, "3" 금지).
 - 도구를 호출할 수 없는 경우에만, 위 구조의 JSON 객체 하나를 ```json 블록으로 출력하고 그 밖에는 아무것도 쓰지 않는다.
 </출력 형식 규칙>"""
 

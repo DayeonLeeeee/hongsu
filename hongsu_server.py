@@ -88,9 +88,10 @@ claude_client = None
 _gemini_configured = False
 
 # Claude 호출 안정성: SDK가 429·5xx·529(과부하)·연결 오류를 지수 백오프로 자동 재시도한다.
-# 재시도 횟수와 요청당 타임아웃을 명시해 둔다 (SDK 기본값: 재시도 2회, 타임아웃 600초).
-CLAUDE_MAX_RETRIES = int(os.environ.get("CLAUDE_MAX_RETRIES", "3"))
-CLAUDE_TIMEOUT_S = float(os.environ.get("CLAUDE_TIMEOUT_S", "180"))
+# 재시도 횟수와 호출당 타임아웃을 명시해 둔다 (SDK 기본값: 재시도 2회, 타임아웃 600초).
+# 최악의 경우 한 요청 = 2회 호출(형식 재시도) × 3번 시도 × 120초 = 720초 → gunicorn --timeout(기본 900)보다 짧아야 한다.
+CLAUDE_MAX_RETRIES = int(os.environ.get("CLAUDE_MAX_RETRIES", "2"))
+CLAUDE_TIMEOUT_S = float(os.environ.get("CLAUDE_TIMEOUT_S", "120"))
 
 def get_claude():
     global claude_client
@@ -134,7 +135,7 @@ def submit_with_context(fn, *args, **kwargs):
 
 @app.before_request
 def _assign_request_id():
-    rid = (request.headers.get("X-Request-ID") or "").strip()[:64] or uuid.uuid4().hex[:12]
+    rid = re.sub(r"[^A-Za-z0-9_.:-]", "", request.headers.get("X-Request-ID") or "")[:64] or uuid.uuid4().hex[:12]
     flask_g.request_id = rid
     flask_g._rid_token = _request_id.set(rid)
 
@@ -744,23 +745,39 @@ _next_id = 1
 
 
 # ─── Supabase 저장: R v2 진단 (rv2_gradings 테이블, sql/rv2_gradings.sql) ───
+RV2_SAVE_KEYS = ["answer_id", "problem_id", "student_id", "attempt_count", "mode", "input_status",
+                 "answer_text", "lines", "main_error_code", "justification_level", "math_result_correct",
+                 "review_needed", "review_reason", "response_complete", "missing_criteria",
+                 "validation_issues", "error", "prompt_version", "codebook_version", "xlsx_sha8",
+                 "allowed_codes", "model", "n_calls", "usage", "stop_reasons", "raw_responses"]
+# grader 1.3에서 추가. 컬럼은 sql/2026-11-24_rv2_gradings_add_columns.sql로 만든다.
+RV2_SAVE_KEYS_V13 = ["request_id", "outcome", "review_sources", "grader_version", "tool_choice",
+                     "response_models", "extraction", "first_issues"]
+
+
 def save_rv2_to_supabase(r: dict):
     """R v2 진단 1건 저장. 응답 원문(raw_responses)까지 저장. 실패해도 서버는 계속 동작."""
     sb = get_supabase()
     if not sb:
         log.warning("[Supabase] 클라이언트 없음, R v2 저장 스킵")
         return
-    keys = ["answer_id", "problem_id", "student_id", "attempt_count", "mode", "input_status",
-            "answer_text", "lines", "main_error_code", "justification_level", "math_result_correct",
-            "review_needed", "review_reason", "response_complete", "missing_criteria",
-            "validation_issues", "error", "prompt_version", "codebook_version", "xlsx_sha8", "allowed_codes", "model",
-            "n_calls", "usage", "stop_reasons", "raw_responses"]
-    row = {k: r.get(k) for k in keys}
+    row = {k: r.get(k) for k in RV2_SAVE_KEYS + RV2_SAVE_KEYS_V13}
     try:
         # returning="minimal": RLS에서 insert만 허용(select 정책 없음)해도 저장되도록.
         # 기본값(representation)은 저장한 행을 다시 읽어 오므로 select 권한이 없으면 RLS 오류가 난다.
         sb.table("rv2_gradings").insert(row, returning="minimal").execute()
         log.info(f"[Supabase] rv2_gradings 저장 완료 ({r.get('answer_id')})")
+        return
+    except Exception as e:
+        msg = str(e)
+        if not any(t in msg for t in ("column", "PGRST204", "schema cache")):
+            log.warning(f"[Supabase] rv2_gradings 저장 실패: {e}")
+            return
+        log.warning("[Supabase] 새 컬럼이 없어 기존 컬럼만 저장합니다 — "
+                    "sql/2026-11-24_rv2_gradings_add_columns.sql 실행 필요")
+    try:
+        sb.table("rv2_gradings").insert({k: r.get(k) for k in RV2_SAVE_KEYS}, returning="minimal").execute()
+        log.info(f"[Supabase] rv2_gradings 저장 완료(기존 컬럼만) ({r.get('answer_id')})")
     except Exception as e:
         log.warning(f"[Supabase] rv2_gradings 저장 실패: {e}")
 

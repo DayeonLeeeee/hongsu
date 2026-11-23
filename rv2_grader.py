@@ -92,7 +92,12 @@ def _to_int(v):
         return None
     if isinstance(v, int):
         return v
+    if isinstance(v, float):  # 3.0 → 3, 3.5처럼 정수가 아니면 해석 불가
+        return int(v) if v.is_integer() else None
     s = str(v or "").strip()
+    if re.fullmatch(r"\d+\.\d+", s):
+        f = float(s)
+        return int(f) if f.is_integer() else None
     if s and s[0] in _CIRCLED:
         return _CIRCLED[s[0]]
     m = re.search(r"\d+", s)
@@ -123,11 +128,11 @@ def normalize_result(parsed: dict) -> dict:
 # 응답 정제 (hongsu-rv2-1.3)
 # ────────────────────────────────
 
+# 코드 필드(code, main_error_code)에서 '값 없음'으로 보는 문자열
 _NULL_WORDS = {"", "null", "none", "nil", "n/a", "na", "-", "없음", "해당없음", "해당 없음"}
+# 텍스트 필드(quote, reason)는 학생이 실제로 '없음', '-'라고 쓴 인용일 수 있어 최소한만 null로 본다
+_TEXT_NULL_WORDS = {"", "null", "none"}
 _JUDGMENTS = {"ok", "wrong", "depends"}
-_JUDGMENT_ALIASES = {"correct": "ok", "right": "ok", "o": "ok", "맞음": "ok",
-                     "incorrect": "wrong", "error": "wrong", "x": "wrong", "틀림": "wrong",
-                     "dependent": "depends", "depend": "depends", "전파": "depends"}
 _J_LEVELS = {"J0", "J1", "J2"}
 _INPUT_STATUS = {"confirmed", "not_attempted", "unreadable"}
 
@@ -144,12 +149,12 @@ def _to_bool(v):
     return None
 
 
-def _to_null_or_str(v):
-    """None·'null'·'' 같은 빈 값 → None, 그 외 → 앞뒤 공백 제거한 문자열."""
+def _to_null_or_str(v, null_words=_NULL_WORDS):
+    """None·'null'·'' 같은 빈 값 → None, 그 외 → 문자열."""
     if v is None:
         return None
-    s = str(v).strip()
-    return None if s.lower() in _NULL_WORDS else s
+    s = str(v)
+    return None if s.strip().lower() in null_words else s
 
 
 def _maybe_json(v):
@@ -172,7 +177,6 @@ def _clean_line(ln: dict, pos: int, issues: list) -> dict:
         issues.append(f"lines[{pos}]: 줄 번호(no) 없음 또는 해석 불가: {ln.get('no')!r}")
     out["no"] = no
     j = str(ln.get("judgment") or "").strip().lower()
-    j = _JUDGMENT_ALIASES.get(j, j)
     if j not in _JUDGMENTS:
         issues.append(f"line {no if no is not None else f'#{pos}'}: judgment 값이 ok/wrong/depends가 아님: "
                       f"{ln.get('judgment')!r}")
@@ -180,17 +184,18 @@ def _clean_line(ln: dict, pos: int, issues: list) -> dict:
     out["student_text"] = "" if ln.get("student_text") is None else str(ln.get("student_text"))
     for k in ("quote", "reason"):
         if k in ln:
-            out[k] = _to_null_or_str(ln.get(k))
+            out[k] = _to_null_or_str(ln.get(k), _TEXT_NULL_WORDS)
     if "code" in ln:
         c = _to_null_or_str(ln.get("code"))
-        out["code"] = c.upper() if c else None
+        out["code"] = c.strip().upper() if c else None
     if "matched_criterion" in ln:
         out["matched_criterion"] = _to_int(ln.get("matched_criterion"))
     if "depends_on" in ln:
-        dep = ln.get("depends_on")
-        if isinstance(dep, list):
-            dep = dep[0] if dep else None
-        out["depends_on"] = _to_int(dep) if dep is not None else None
+        dep = _maybe_json(ln.get("depends_on"))
+        if isinstance(dep, list):  # 원인 줄이 여러 개면 리스트 그대로 둔다 (정보를 버리지 않음)
+            out["depends_on"] = [n for n in (_to_int(x) for x in dep) if n is not None] or None
+        else:
+            out["depends_on"] = _to_int(dep) if dep is not None else None
     return out
 
 
@@ -239,9 +244,10 @@ def sanitize(parsed, mode: str = "with_codebook"):
 
     if mode == "with_codebook":
         mec = _to_null_or_str(parsed.get("main_error_code"))
-        out["main_error_code"] = mec.upper() if mec else None
+        out["main_error_code"] = mec.strip().upper() if mec else None
 
         jl = _to_null_or_str(parsed.get("justification_level"))
+        jl = jl.strip() if jl else jl
         if jl is None:
             issues.append("justification_level 없음")
         elif jl.upper() in _J_LEVELS:
@@ -412,6 +418,8 @@ def diagnose(client, problem_id: str, answer_text: str, mode: str = "with_codebo
         if parsed is None:
             return None, [f"결과 블록 없음 (stop_reason={stop_reason}) — 지정된 도구 형식(JSON)으로 출력할 것"]
         clean, s_issues = sanitize(parsed, mode)
+        if not clean:
+            return None, s_issues
         v_issues = validate(clean, answer_text, built["allowed_codes"], with_codes, criteria_nos)
         return clean, s_issues + v_issues
 

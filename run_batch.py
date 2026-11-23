@@ -83,8 +83,8 @@ def main():
         import rv2_codebook
         import rv2_grader
         client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
-                                     max_retries=int(os.environ.get("CLAUDE_MAX_RETRIES", "3")),
-                                     timeout=float(os.environ.get("CLAUDE_TIMEOUT_S", "180")))
+                                     max_retries=int(os.environ.get("CLAUDE_MAX_RETRIES", "2")),
+                                     timeout=float(os.environ.get("CLAUDE_TIMEOUT_S", "120")))
         model, cbv = rv2_grader.RV2_MODEL, rv2_codebook.get().get("codebook_version")
     else:
         model, cbv = "server", "server"

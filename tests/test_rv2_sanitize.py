@@ -334,3 +334,48 @@ def test_env_override(monkeypatch):
     assert mod.RV2_TOOL_CHOICE == "tool" and mod.RV2_TEMPERATURE == 0.0
     monkeypatch.delenv("RV2_TOOL_CHOICE"); monkeypatch.delenv("RV2_TEMPERATURE")
     importlib.reload(g)
+
+
+# ── 점검에서 나온 회귀 방지 ───────────────────────────────
+
+def test_quote_written_as_eopseum_is_kept():
+    """학생이 실제로 '없음'이라고 쓴 줄의 인용이 null로 지워지면 안 된다."""
+    p = good()
+    p["lines"][1]["quote"] = "없음"
+    out, _ = g.sanitize(p)
+    assert out["lines"][1]["quote"] == "없음"
+
+
+def test_judgment_words_are_not_reinterpreted():
+    """판정값은 대소문자만 정리. 'x', 'error' 같은 단어를 wrong으로 바꾸지 않고 재시도로 보낸다."""
+    p = good()
+    p["lines"][1]["judgment"] = "x"
+    out, issues = g.sanitize(p)
+    assert out["lines"][1]["judgment"] == "x"
+    assert any("judgment" in s for s in issues)
+
+
+def test_non_object_response_twice_is_error_not_empty_success():
+    c = FakeClient([[_text_block('```json\n["a"]\n```')], [_text_block("[1,2]")]])
+    rec = g.diagnose(c, PID, ANSWER, temperature=None)
+    assert rec["result"] is None and rec["error"]
+    assert g.classify_outcome(rec)[0] == "error"
+
+
+def test_depends_on_list_is_kept():
+    p = good()
+    p["lines"][1]["depends_on"] = [1, "2"]
+    out, _ = g.sanitize(p)
+    assert out["lines"][1]["depends_on"] == [1, 2]
+    assert g.to_server_steps(out)[1]["depends_on_line_id"] == 1
+
+
+def test_fractional_line_number_is_not_truncated():
+    p = good()
+    p["lines"][1]["no"] = 2.5
+    out, issues = g.sanitize(p)
+    assert out["lines"][1]["no"] is None
+    assert any("줄 번호" in s for s in issues)
+    p["lines"][1]["no"] = "2.0"
+    out, issues = g.sanitize(p)
+    assert out["lines"][1]["no"] == 2 and issues == []
