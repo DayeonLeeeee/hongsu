@@ -55,6 +55,8 @@ def grade_remote(url: str, row: dict) -> dict:
         "codebook_version": d.get("codebook_version"), "xlsx_sha8": d.get("xlsx_sha8"),
         "allowed_codes": d.get("allowed_codes"), "usage": d.get("usage"), "n_calls": d.get("n_calls"),
         "stop_reasons": d.get("stop_reasons"), "validation_issues": d.get("validation_issues"),
+        "tool_choice": d.get("tool_choice"), "extraction": d.get("extraction"),
+        "first_issues": d.get("first_issues"),
         "error": d.get("error") or (None if d.get("success") else f"HTTP {resp.status_code}"),
         "server_answer_id": d.get("answer_id"),
         "result": {k: d.get(k) for k in result_keys} if d.get("lines") is not None else None,

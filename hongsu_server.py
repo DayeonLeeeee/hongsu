@@ -439,6 +439,9 @@ def grade_rv2_endpoint():
             "n_calls": rec.get("n_calls"),
             "usage": rec.get("usage"),
             "stop_reasons": rec.get("stop_reasons"),
+            "tool_choice": rec.get("tool_choice"),
+            "extraction": rec.get("extraction", []),        # 호출별 결과 출처 tool/text/none (스키마 안정성 측정)
+            "first_issues": rec.get("first_issues", []),    # 첫 호출 정제·검증 사유 (재시도로 해결돼도 기록)
             # ── 기존 프론트 호환 ──
             "is_correct": res.get("math_result_correct"),
             "steps": rv2_grader.to_server_steps(res),

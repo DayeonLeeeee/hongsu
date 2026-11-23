@@ -16,12 +16,21 @@ hongsu-rv2-1.2 (코드북 R-v3 규칙 12 대응):
   - validate(): missing_criteria의 번호가 이 문항의 기준 판정표 번호인지 확인.
   - normalize_result(): 모델이 필드를 빼먹어도 저장·채점이 깨지지 않게 형식을 맞춘다.
 
+hongsu-rv2-1.3 (안정화):
+  - extract_result(): tool_use 블록이 없으면 텍스트 블록의 JSON을 읽는다 (도구 강제를 거부하는 모델 대응).
+  - sanitize(): LLM 응답 정제를 한 곳으로 통합. 고칠 수 있는 형식은 고치고,
+    고칠 수 없는 것(문자열 줄, 허용 밖 판정값 등)은 조용히 버리지 않고 issues로 돌려 재시도·검수로 보낸다.
+  - 결과 블록이 아예 없어도 예외로 끝내지 않고 1회 재시도한다.
+  - rec["extraction"]: 호출마다 결과를 어디서 읽었는지(tool/text/none) 기록 — 스키마 안정성 측정용.
+
 환경변수:
   RV2_MODEL        기본 claude-haiku-4-5 (11/8 미팅 결정: Stage 3는 Haiku로 진행. 이전 기본값 claude-opus-4-6)
   RV2_MAX_TOKENS   기본 8000 (실험에서 2000은 thinking 모델이 잘림)
   RV2_TEMPERATURE  기본 0.0, "none"이면 전송 안 함 (Fable 5처럼 temperature를 거부하는 모델용)
+  RV2_TOOL_CHOICE  기본 "tool"(도구 호출 강제), "auto"면 강제하지 않음 (Opus 5.5처럼 강제를 거부하는 모델용)
 """
 import datetime
+import json
 import os
 import re
 
@@ -32,6 +41,9 @@ RV2_MODEL = os.environ.get("RV2_MODEL", "claude-haiku-4-5")
 RV2_MAX_TOKENS = int(os.environ.get("RV2_MAX_TOKENS", "8000"))
 _t = os.environ.get("RV2_TEMPERATURE", "0.0")
 RV2_TEMPERATURE = None if _t.lower() == "none" else float(_t)
+RV2_TOOL_CHOICE = os.environ.get("RV2_TOOL_CHOICE", "tool").strip().lower()
+if RV2_TOOL_CHOICE not in ("tool", "auto"):
+    RV2_TOOL_CHOICE = "tool"
 
 USAGE_KEYS = ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
 
@@ -76,6 +88,176 @@ def normalize_result(parsed: dict) -> dict:
         rc = {"true": True, "false": False}.get(rc.strip().lower())
     parsed["response_complete"] = rc if isinstance(rc, bool) else None
     return parsed
+
+
+# ────────────────────────────────
+# 응답 정제 (hongsu-rv2-1.3)
+# ────────────────────────────────
+
+_NULL_WORDS = {"", "null", "none", "nil", "n/a", "na", "-", "없음", "해당없음", "해당 없음"}
+_JUDGMENTS = {"ok", "wrong", "depends"}
+_JUDGMENT_ALIASES = {"correct": "ok", "right": "ok", "o": "ok", "맞음": "ok",
+                     "incorrect": "wrong", "error": "wrong", "x": "wrong", "틀림": "wrong",
+                     "dependent": "depends", "depend": "depends", "전파": "depends"}
+_J_LEVELS = {"J0", "J1", "J2"}
+_INPUT_STATUS = {"confirmed", "not_attempted", "unreadable"}
+
+
+def _to_bool(v):
+    """True/False/'true'/'false'/1/0 → bool, 해석 못 하면 None."""
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, int) and v in (0, 1):
+        return bool(v)
+    if isinstance(v, str):
+        return {"true": True, "false": False, "yes": True, "no": False,
+                "1": True, "0": False}.get(v.strip().lower())
+    return None
+
+
+def _to_null_or_str(v):
+    """None·'null'·'' 같은 빈 값 → None, 그 외 → 앞뒤 공백 제거한 문자열."""
+    if v is None:
+        return None
+    s = str(v).strip()
+    return None if s.lower() in _NULL_WORDS else s
+
+
+def _maybe_json(v):
+    """문자열로 온 JSON 객체·배열을 푼다. 못 풀면 원래 값."""
+    if isinstance(v, str):
+        s = v.strip()
+        if s[:1] in "{[":
+            try:
+                return json.loads(s)
+            except (json.JSONDecodeError, ValueError):
+                pass
+    return v
+
+
+def _clean_line(ln: dict, pos: int, issues: list) -> dict:
+    """줄 하나의 필드 형식을 맞춘다. pos = lines 안 위치(1부터, 사유 표시용)."""
+    out = dict(ln)
+    no = _to_int(ln.get("no"))
+    if no is None:
+        issues.append(f"lines[{pos}]: 줄 번호(no) 없음 또는 해석 불가: {ln.get('no')!r}")
+    out["no"] = no
+    j = str(ln.get("judgment") or "").strip().lower()
+    j = _JUDGMENT_ALIASES.get(j, j)
+    if j not in _JUDGMENTS:
+        issues.append(f"line {no if no is not None else f'#{pos}'}: judgment 값이 ok/wrong/depends가 아님: "
+                      f"{ln.get('judgment')!r}")
+    out["judgment"] = j or None
+    out["student_text"] = "" if ln.get("student_text") is None else str(ln.get("student_text"))
+    for k in ("quote", "reason"):
+        if k in ln:
+            out[k] = _to_null_or_str(ln.get(k))
+    if "code" in ln:
+        c = _to_null_or_str(ln.get("code"))
+        out["code"] = c.upper() if c else None
+    if "matched_criterion" in ln:
+        out["matched_criterion"] = _to_int(ln.get("matched_criterion"))
+    if "depends_on" in ln:
+        dep = ln.get("depends_on")
+        if isinstance(dep, list):
+            dep = dep[0] if dep else None
+        out["depends_on"] = _to_int(dep) if dep is not None else None
+    return out
+
+
+def sanitize(parsed, mode: str = "with_codebook"):
+    """LLM 응답 정제 (단일 진입점).
+
+    반환: (정제된 dict, issues 리스트)
+      - 고칠 수 있는 형식(문자열 불리언, 'null' 문자열, 대소문자, '③' 같은 번호)은 고친다.
+      - 고칠 수 없는 것은 버리지 않고 issues에 사유를 남긴다 → diagnose()가 1회 재시도, 그래도 남으면 검수.
+    """
+    issues = []
+    parsed = _maybe_json(parsed)
+    if not isinstance(parsed, dict):
+        return {}, [f"응답이 객체(dict)가 아님: {type(parsed).__name__}"]
+    out = dict(parsed)
+
+    # lines
+    lines = _maybe_json(parsed.get("lines"))
+    if lines is None:
+        issues.append("lines 없음")
+        lines = []
+    elif not isinstance(lines, list):
+        issues.append(f"lines가 리스트가 아님: {type(lines).__name__}")
+        lines = []
+    clean_lines = []
+    for i, ln in enumerate(lines, 1):
+        ln = _maybe_json(ln)
+        if not isinstance(ln, dict):
+            preview = str(ln)[:40]
+            issues.append(f"lines[{i}]: 줄이 객체가 아님 ({type(ln).__name__}: {preview!r})")
+            continue
+        clean_lines.append(_clean_line(ln, i, issues))
+    out["lines"] = clean_lines
+
+    # 공통 필드
+    mrc = _to_bool(parsed.get("math_result_correct"))
+    if mrc is None:
+        issues.append(f"math_result_correct 해석 불가: {parsed.get('math_result_correct')!r}")
+    out["math_result_correct"] = mrc
+
+    st = str(parsed.get("input_status") or "confirmed").strip().lower()
+    if st not in _INPUT_STATUS:
+        issues.append(f"input_status 값 오류: {parsed.get('input_status')!r}")
+        st = "confirmed"
+    out["input_status"] = st
+
+    if mode == "with_codebook":
+        mec = _to_null_or_str(parsed.get("main_error_code"))
+        out["main_error_code"] = mec.upper() if mec else None
+
+        jl = _to_null_or_str(parsed.get("justification_level"))
+        if jl is None:
+            issues.append("justification_level 없음")
+        elif jl.upper() in _J_LEVELS:
+            jl = jl.upper()
+        elif jl.lower().replace(" ", "_") == "not_applicable":
+            jl = "not_applicable"
+        else:
+            issues.append(f"justification_level 값 오류: {jl!r}")
+        out["justification_level"] = jl
+
+        rn = _to_bool(parsed.get("review_needed"))
+        out["review_needed"] = bool(rn) if rn is not None else False
+        rr = parsed.get("review_reason")
+        out["review_reason"] = "" if rr is None else str(rr)
+
+    out = normalize_result(out)  # response_complete / missing_criteria
+    return out, issues
+
+
+def extract_result(content_blocks):
+    """응답 블록에서 결과 dict와 출처를 꺼낸다.
+    tool_use 블록 우선 → 없으면 텍스트 블록의 JSON(```json 펜스 포함) → 둘 다 없으면 (None, 'none')."""
+    texts = []
+    for b in content_blocks or []:
+        btype = getattr(b, "type", None) if not isinstance(b, dict) else b.get("type")
+        if btype == "tool_use":
+            inp = getattr(b, "input", None) if not isinstance(b, dict) else b.get("input")
+            return (dict(inp) if isinstance(inp, dict) else inp), "tool"
+        if btype == "text":
+            texts.append(getattr(b, "text", None) if not isinstance(b, dict) else b.get("text"))
+    for t in texts:
+        if not t:
+            continue
+        m = re.search(r"```(?:json)?\s*(\{.*\})\s*```", t, re.S)
+        cand = m.group(1) if m else None
+        if cand is None and "{" in t and "}" in t:
+            cand = t[t.index("{"): t.rindex("}") + 1]
+        if cand:
+            try:
+                obj = json.loads(cand)
+                if isinstance(obj, dict):
+                    return obj, "text"
+            except (json.JSONDecodeError, ValueError):
+                continue
+    return None, "none"
 
 
 def validate(parsed: dict, answer_text: str, allowed: list, with_codes: bool,
@@ -130,26 +312,28 @@ def _dump_content(resp) -> list:
     return out
 
 
-def _call(client, model, system, user, tool, max_tokens, temperature):
+def _call(client, model, system, user, tool, max_tokens, temperature, tool_choice=None):
+    tool_choice = tool_choice or RV2_TOOL_CHOICE
     kw = dict(model=model, max_tokens=max_tokens, system=system,
-              tools=[tool], tool_choice={"type": "tool", "name": tool["name"]},
-              messages=[{"role": "user", "content": user}])
+              tools=[tool], messages=[{"role": "user", "content": user}])
+    if tool_choice == "tool":
+        kw["tool_choice"] = {"type": "tool", "name": tool["name"]}
+    else:
+        kw["tool_choice"] = {"type": "auto"}
     if temperature is not None:
         kw["temperature"] = temperature
     resp = client.messages.create(**kw)
     u = getattr(resp, "usage", None)
     usage = {k: (getattr(u, k, 0) or 0) for k in USAGE_KEYS}
-    parsed = None
-    for b in resp.content:
-        if getattr(b, "type", None) == "tool_use":
-            parsed = dict(b.input)
-            break
-    raw = {"stop_reason": resp.stop_reason, "usage": usage, "content": _dump_content(resp), "ts": _now()}
+    parsed, source = extract_result(getattr(resp, "content", []))
+    raw = {"stop_reason": resp.stop_reason, "usage": usage, "content": _dump_content(resp),
+           "extraction": source, "ts": _now()}
     return parsed, raw
 
 
 def diagnose(client, problem_id: str, answer_text: str, mode: str = "with_codebook",
-             model: str = None, max_tokens: int = None, temperature="default") -> dict:
+             model: str = None, max_tokens: int = None, temperature="default",
+             tool_choice: str = None) -> dict:
     """R v2 진단 1건. 예외를 던지지 않고 항상 결과 dict를 돌려준다 (실패도 원문과 함께 기록)."""
     assert mode in ("grade_only", "with_codebook")
     model = model or RV2_MODEL
@@ -171,27 +355,43 @@ def diagnose(client, problem_id: str, answer_text: str, mode: str = "with_codebo
         "answer_text": answer_text, "max_tokens": max_tokens, "temperature": temperature,
         "ts": _now(), "raw_responses": [], "usage": {k: 0 for k in USAGE_KEYS},
         "n_calls": 0, "stop_reasons": [], "result": None, "validation_issues": [], "error": None,
+        "tool_choice": tool_choice or RV2_TOOL_CHOICE,
+        "extraction": [],          # 호출마다 tool / text / none
+        "first_issues": [],        # 첫 호출의 정제·검증 사유 (재시도로 해결됐어도 기록 — 안정성 측정용)
     }
 
     def _one(u):
-        parsed, raw = _call(client, model, built["system"], u, tool, max_tokens, temperature)
+        parsed, raw = _call(client, model, built["system"], u, tool, max_tokens, temperature,
+                            tool_choice=tool_choice)
         rec["raw_responses"].append(raw)
         rec["n_calls"] += 1
         rec["stop_reasons"].append(raw["stop_reason"])
+        rec["extraction"].append(raw["extraction"])
         for k in USAGE_KEYS:
             rec["usage"][k] += raw["usage"].get(k, 0)
+        return parsed, raw["stop_reason"]
+
+    def _check(parsed, stop_reason):
+        """정제 + 검증. 결과 블록이 없으면 (None, [사유])."""
         if parsed is None:
-            raise ValueError(f"tool_use 블록 없음 (stop_reason={raw['stop_reason']})")
-        return parsed
+            return None, [f"결과 블록 없음 (stop_reason={stop_reason}) — 지정된 도구 형식(JSON)으로 출력할 것"]
+        clean, s_issues = sanitize(parsed, mode)
+        v_issues = validate(clean, answer_text, built["allowed_codes"], with_codes, criteria_nos)
+        return clean, s_issues + v_issues
 
     try:
-        parsed = normalize_result(_one(user))
-        issues = validate(parsed, answer_text, built["allowed_codes"], with_codes, criteria_nos)
-        if issues:  # 키트와 동일: 실패 사유를 붙여 1회 재시도
+        clean, issues = _check(*_one(user))
+        rec["first_issues"] = list(issues)
+        if issues:  # 키트와 동일: 실패 사유를 붙여 1회 재시도 (결과 블록 없음·정제 실패 포함)
             retry_user = user + "\n\n[이전 출력의 문제점 — 수정하여 다시 출력]\n- " + "\n- ".join(issues)
-            parsed = normalize_result(_one(retry_user))
-            issues = validate(parsed, answer_text, built["allowed_codes"], with_codes, criteria_nos)
-        rec["result"] = parsed
+            clean2, issues2 = _check(*_one(retry_user))
+            if clean2 is not None:
+                clean, issues = clean2, issues2
+            elif clean is None:
+                issues = issues2
+        if clean is None:
+            rec["error"] = "결과 블록 없음 (재시도 후에도): " + "; ".join(issues)
+        rec["result"] = clean
         rec["validation_issues"] = issues
     except Exception as e:
         rec["error"] = f"{type(e).__name__}: {e}"
