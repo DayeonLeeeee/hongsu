@@ -31,7 +31,7 @@ import contextvars
 import logging
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from flask import Flask, request, jsonify, g as flask_g
+from flask import Flask, request, jsonify
 import requests as http_requests
 
 # ── 로깅 ──
@@ -133,16 +133,28 @@ def submit_with_context(fn, *args, **kwargs):
     return executor.submit(ctx.run, fn, *args, **kwargs)
 
 
+# request_id는 요청별 environ에 둔다. flask.g는 앱 컨텍스트 단위라, 요청 안에서 내부 요청을 보내면
+# (/measure_consistency → /grade) 안쪽 요청이 바깥 값을 덮어써 끝날 때 에러가 났다.
+_RID_KEY = "hongsu.request_id"
+_RID_TOKEN_KEY = "hongsu.request_id_token"
+
+
+def current_request_id():
+    """지금 처리 중인 요청의 ID (요청 밖이면 None)."""
+    rid = _request_id.get()
+    return None if rid == "-" else rid
+
+
 @app.before_request
 def _assign_request_id():
     rid = re.sub(r"[^A-Za-z0-9_.:-]", "", request.headers.get("X-Request-ID") or "")[:64] or uuid.uuid4().hex[:12]
-    flask_g.request_id = rid
-    flask_g._rid_token = _request_id.set(rid)
+    request.environ[_RID_KEY] = rid
+    request.environ[_RID_TOKEN_KEY] = _request_id.set(rid)
 
 
 @app.after_request
 def _return_request_id(resp):
-    rid = getattr(flask_g, "request_id", None)
+    rid = request.environ.get(_RID_KEY)
     if rid:
         resp.headers["X-Request-ID"] = rid
     return resp
@@ -150,7 +162,7 @@ def _return_request_id(resp):
 
 @app.teardown_request
 def _clear_request_id(exc):
-    tok = getattr(flask_g, "_rid_token", None)
+    tok = request.environ.pop(_RID_TOKEN_KEY, None)
     if tok is not None:
         _request_id.reset(tok)
 
@@ -162,7 +174,7 @@ def _unhandled(e):
         return e
     log.exception("[처리되지 않은 에러] %s %s", request.method, request.path)
     return jsonify({"success": False, "error": f"{type(e).__name__}: {e}",
-                    "request_id": getattr(flask_g, "request_id", None)}), 500
+                    "request_id": current_request_id()}), 500
 
 
 # ─── 공통 유틸 ─────
@@ -486,7 +498,7 @@ def grade_rv2_endpoint():
         result = {
             "success": rec.get("error") is None,
             "answer_id": answer_id,
-            "request_id": getattr(flask_g, "request_id", None),   # 서버 로그 검색용
+            "request_id": current_request_id(),   # 서버 로그 검색용
             "problem_id": problem_id,
             "student_id": student_id,
             "attempt_count": attempt_count,
