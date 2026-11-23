@@ -52,6 +52,7 @@ def grade_remote(url: str, row: dict) -> dict:
                    "input_status", "review_needed", "review_reason", "response_complete", "missing_criteria"]
     return {
         "model": d.get("model"), "prompt_version": d.get("prompt_version"),
+        "grader_version": d.get("grader_version"),
         "codebook_version": d.get("codebook_version"), "xlsx_sha8": d.get("xlsx_sha8"),
         "allowed_codes": d.get("allowed_codes"), "usage": d.get("usage"), "n_calls": d.get("n_calls"),
         "stop_reasons": d.get("stop_reasons"), "validation_issues": d.get("validation_issues"),
@@ -79,7 +80,9 @@ def main():
         import anthropic
         import rv2_codebook
         import rv2_grader
-        client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+        client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
+                                     max_retries=int(os.environ.get("CLAUDE_MAX_RETRIES", "3")),
+                                     timeout=float(os.environ.get("CLAUDE_TIMEOUT_S", "180")))
         model, cbv = rv2_grader.RV2_MODEL, rv2_codebook.get().get("codebook_version")
     else:
         model, cbv = "server", "server"

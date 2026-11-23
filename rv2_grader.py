@@ -41,6 +41,9 @@ RV2_MODEL = os.environ.get("RV2_MODEL", "claude-haiku-4-5")
 RV2_MAX_TOKENS = int(os.environ.get("RV2_MAX_TOKENS", "8000"))
 _t = os.environ.get("RV2_TEMPERATURE", "0.0")
 RV2_TEMPERATURE = None if _t.lower() == "none" else float(_t)
+# 채점 동작(정제·검증·재시도 로직) 버전. 프롬프트가 같아도 이 값이 다르면 결과를 직접 비교하지 않는다.
+GRADER_VERSION = "rv2-grader-1.3"
+
 RV2_TOOL_CHOICE = os.environ.get("RV2_TOOL_CHOICE", "tool").strip().lower()
 if RV2_TOOL_CHOICE not in ("tool", "auto"):
     RV2_TOOL_CHOICE = "tool"
@@ -350,7 +353,8 @@ def diagnose(client, problem_id: str, answer_text: str, mode: str = "with_codebo
 
     rec = {
         "problem_id": problem_id, "mode": mode, "model": model,
-        "prompt_version": built["version"], "codebook_version": mats.get("codebook_version"),
+        "prompt_version": built["version"], "grader_version": GRADER_VERSION,
+        "codebook_version": mats.get("codebook_version"),
         "xlsx_sha8": mats.get("xlsx_sha8"), "allowed_codes": built["allowed_codes"],
         "answer_text": answer_text, "max_tokens": max_tokens, "temperature": temperature,
         "ts": _now(), "raw_responses": [], "usage": {k: 0 for k in USAGE_KEYS},

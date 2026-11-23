@@ -251,3 +251,9 @@ def test_tool_choice_default_forces_tool():
     c = FakeClient([[_tool_block(good())]])
     g.diagnose(c, PID, ANSWER, temperature=None, tool_choice="tool")
     assert c.calls[0]["tool_choice"]["type"] == "tool"
+
+
+def test_grader_version_recorded():
+    c = FakeClient([[_tool_block(good())]])
+    rec = g.diagnose(c, PID, ANSWER, temperature=None)
+    assert rec["grader_version"] == g.GRADER_VERSION

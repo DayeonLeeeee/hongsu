@@ -59,11 +59,18 @@ MAX_ATTEMPTS_BEFORE_REVEAL = 3
 claude_client = None
 _gemini_configured = False
 
+# Claude 호출 안정성: SDK가 429·5xx·529(과부하)·연결 오류를 지수 백오프로 자동 재시도한다.
+# 재시도 횟수와 요청당 타임아웃을 명시해 둔다 (SDK 기본값: 재시도 2회, 타임아웃 600초).
+CLAUDE_MAX_RETRIES = int(os.environ.get("CLAUDE_MAX_RETRIES", "3"))
+CLAUDE_TIMEOUT_S = float(os.environ.get("CLAUDE_TIMEOUT_S", "180"))
+
 def get_claude():
     global claude_client
     if claude_client is None:
         import anthropic
-        claude_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        claude_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY,
+                                            max_retries=CLAUDE_MAX_RETRIES,
+                                            timeout=CLAUDE_TIMEOUT_S)
     return claude_client
 
 def get_gemini_model():
@@ -431,6 +438,7 @@ def grade_rv2_endpoint():
             "error": rec.get("error"),
             # ── 재현성 필드 (README 규칙 5) ──
             "prompt_version": rec.get("prompt_version"),
+            "grader_version": rec.get("grader_version", rv2_grader.GRADER_VERSION),
             "codebook_version": rec.get("codebook_version"),
             "xlsx_sha8": rec.get("xlsx_sha8"),
             "allowed_codes": rec.get("allowed_codes"),
