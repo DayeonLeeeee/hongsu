@@ -413,9 +413,8 @@ def grade_rv2_endpoint():
             rec = rv2_grader.diagnose(get_claude(), problem_id, answer_text, mode=mode)
 
         res = rec.get("result") or {}
-        review_needed = bool(res.get("review_needed")) or bool(rec.get("validation_issues")) or bool(rec.get("error"))
-        if "max_tokens" in (rec.get("stop_reasons") or []):
-            review_needed = True
+        outcome, review_sources = rv2_grader.classify_outcome(rec)
+        review_needed = outcome in ("review", "error")
 
         result = {
             "success": rec.get("error") is None,
@@ -430,6 +429,8 @@ def grade_rv2_endpoint():
             "main_error_code": res.get("main_error_code"),
             "justification_level": res.get("justification_level"),
             "math_result_correct": res.get("math_result_correct"),
+            "outcome": outcome,                  # graded / review / incomplete / not_attempted / unreadable / error
+            "review_sources": review_sources,    # review로 간 이유: model(기권) / validation / max_tokens / error
             "review_needed": review_needed,
             "review_reason": res.get("review_reason", ""),
             "response_complete": res.get("response_complete"),       # R-v3 규칙 12: False면 미완 답안
@@ -461,7 +462,7 @@ def grade_rv2_endpoint():
         save_rv2_to_supabase({**result, "answer_text": rec.get("answer_text"),
                               "raw_responses": rec.get("raw_responses")})
 
-        print(f"  [R v2 완료] main={result['main_error_code']} J={result['justification_level']} "
+        print(f"  [R v2 완료] outcome={outcome} sources={review_sources} main={result['main_error_code']} J={result['justification_level']} "
               f"complete={result['response_complete']} missing={result['missing_criteria']} "
               f"review={review_needed} calls={rec.get('n_calls')} issues={rec.get('validation_issues')}")
         status = 200 if result["success"] else 502
@@ -531,11 +532,41 @@ def master_solution_endpoint():
 
 @app.route("/health", methods=["GET"])
 def health():
+    """기본: 서버·코드북 상태만 (가벼움, 상태 점검용).
+    ?deep=1: Supabase 조회와 Claude API(모델 조회, 토큰 비용 없음)까지 확인. 하나라도 실패하면 503."""
     m = rv2_codebook.get()
-    return jsonify({"status": "ok", "time": now_iso(), "version": "hongsu-rv2-1.2",
-                    "rv2_model": rv2_grader.RV2_MODEL, "xlsx_sha8": m.get("xlsx_sha8"),
-                    "codebook_version": m.get("codebook_version"),
-                    "rv2_problems": len(m.get("problems", []))})
+    body = {"status": "ok", "time": now_iso(), "version": p_rv2.PORT_VERSION,
+            "grader_version": rv2_grader.GRADER_VERSION,
+            "rv2_model": rv2_grader.RV2_MODEL, "tool_choice": rv2_grader.RV2_TOOL_CHOICE,
+            "temperature": rv2_grader.RV2_TEMPERATURE,
+            "xlsx_sha8": m.get("xlsx_sha8"), "codebook_version": m.get("codebook_version"),
+            "rv2_problems": len(m.get("problems", []))}
+    if request.args.get("deep") not in ("1", "true", "yes"):
+        return jsonify(body)
+
+    checks = {}
+    sb = get_supabase()
+    if sb is None:
+        checks["supabase"] = {"ok": False, "error": "클라이언트 없음 (SUPABASE_URL/KEY 확인)"}
+    else:
+        try:
+            sb.table("rv2_gradings").select("answer_id").limit(1).execute()
+            checks["supabase"] = {"ok": True}
+        except Exception as e:
+            checks["supabase"] = {"ok": False, "error": f"{type(e).__name__}: {str(e)[:200]}"}
+    if not ANTHROPIC_API_KEY:
+        checks["claude"] = {"ok": False, "error": "ANTHROPIC_API_KEY 없음"}
+    else:
+        try:
+            info = get_claude().models.retrieve(rv2_grader.RV2_MODEL)
+            checks["claude"] = {"ok": True, "model": getattr(info, "id", rv2_grader.RV2_MODEL)}
+        except Exception as e:
+            checks["claude"] = {"ok": False, "error": f"{type(e).__name__}: {str(e)[:200]}"}
+    body["checks"] = checks
+    if not all(c["ok"] for c in checks.values()):
+        body["status"] = "degraded"
+        return jsonify(body), 503
+    return jsonify(body)
 
 
 # 관리자 웹 UI (브라우저에서 /admin 접속)

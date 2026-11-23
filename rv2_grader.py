@@ -402,6 +402,38 @@ def diagnose(client, problem_id: str, answer_text: str, mode: str = "with_codebo
     return rec
 
 
+def classify_outcome(rec: dict):
+    """진단 기록 → (outcome, review_sources).
+
+    outcome (우선순위 순):
+      error          결과 없음 (재시도 후에도 결과 블록 없음, API 오류)
+      not_attempted  백지
+      unreadable     판독 불가
+      review         검수 필요 — 모델 기권, 재시도 후에도 남은 형식·검증 문제, 출력 잘림
+      incomplete     미완 답안 (response_complete=false, R-v3 규칙 12)
+      graded         채점 완료
+    review_sources: review로 간 이유 목록 (model / validation / max_tokens). 기권 분류·현장 처리에 쓴다.
+    """
+    res = rec.get("result") or {}
+    if rec.get("error") or not res:
+        return "error", ["error"]
+    st = res.get("input_status")
+    if st in ("not_attempted", "unreadable"):
+        return st, []
+    sources = []
+    if res.get("review_needed"):
+        sources.append("model")
+    if rec.get("validation_issues"):
+        sources.append("validation")
+    if "max_tokens" in (rec.get("stop_reasons") or []):
+        sources.append("max_tokens")
+    if sources:
+        return "review", sources
+    if res.get("response_complete") is False:
+        return "incomplete", []
+    return "graded", []
+
+
 def to_server_steps(result: dict) -> list:
     """기존 프론트 호환용: lines → steps(index/text/status/explanation/depends_on_line_id)."""
     steps = []

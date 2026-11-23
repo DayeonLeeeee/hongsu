@@ -37,6 +37,7 @@ def load_answers(path: str, include_all: bool) -> list:
 def grade_local(client, row: dict) -> dict:
     import rv2_grader
     rec = rv2_grader.diagnose(client, row["problem_id"], row["학생_답안"], mode="with_codebook")
+    rec["outcome"], rec["review_sources"] = rv2_grader.classify_outcome(rec)
     rec.pop("answer_text", None)
     return rec
 
@@ -58,6 +59,7 @@ def grade_remote(url: str, row: dict) -> dict:
         "stop_reasons": d.get("stop_reasons"), "validation_issues": d.get("validation_issues"),
         "tool_choice": d.get("tool_choice"), "extraction": d.get("extraction"),
         "first_issues": d.get("first_issues"),
+        "outcome": d.get("outcome"), "review_sources": d.get("review_sources"),
         "error": d.get("error") or (None if d.get("success") else f"HTTP {resp.status_code}"),
         "server_answer_id": d.get("answer_id"),
         "result": {k: d.get(k) for k in result_keys} if d.get("lines") is not None else None,

@@ -257,3 +257,46 @@ def test_grader_version_recorded():
     c = FakeClient([[_tool_block(good())]])
     rec = g.diagnose(c, PID, ANSWER, temperature=None)
     assert rec["grader_version"] == g.GRADER_VERSION
+
+
+# ── classify_outcome ──────────────────────────────────────
+
+def _rec(result=None, **kw):
+    base = {"result": result, "error": None, "validation_issues": [], "stop_reasons": ["end_turn"]}
+    base.update(kw)
+    return base
+
+
+def test_outcome_graded():
+    assert g.classify_outcome(_rec(good())) == ("graded", [])
+
+
+def test_outcome_model_abstained():
+    r = good()
+    r["review_needed"] = True
+    assert g.classify_outcome(_rec(r)) == ("review", ["model"])
+
+
+def test_outcome_validation_and_truncation():
+    out = g.classify_outcome(_rec(good(), validation_issues=["x"], stop_reasons=["max_tokens"]))
+    assert out == ("review", ["validation", "max_tokens"])
+
+
+def test_outcome_incomplete():
+    r = good()
+    r["response_complete"] = False
+    assert g.classify_outcome(_rec(r)) == ("incomplete", [])
+
+
+def test_outcome_review_wins_over_incomplete():
+    r = good()
+    r["response_complete"] = False
+    r["review_needed"] = True
+    assert g.classify_outcome(_rec(r))[0] == "review"
+
+
+def test_outcome_blank_and_error():
+    r = good()
+    r["input_status"] = "not_attempted"
+    assert g.classify_outcome(_rec(r)) == ("not_attempted", [])
+    assert g.classify_outcome(_rec(None, error="boom")) == ("error", ["error"])
