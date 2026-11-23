@@ -26,11 +26,39 @@ import re
 import math
 import asyncio
 import datetime
-import traceback
 import statistics
+import contextvars
+import logging
+import uuid
 from concurrent.futures import ThreadPoolExecutor
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, g as flask_g
 import requests as http_requests
+
+# ── 로깅 ──
+# 모든 로그 줄에 request_id를 붙인다. 요청 밖(서버 시작 등)은 "-".
+# ContextVar라서 OCR 병렬 호출 스레드에도 같은 ID가 이어진다 (executor.submit에서 컨텍스트 복사).
+_request_id = contextvars.ContextVar("request_id", default="-")
+
+
+class _RequestIdFilter(logging.Filter):
+    def filter(self, record):
+        record.request_id = _request_id.get()
+        return True
+
+
+def _setup_logging() -> logging.Logger:
+    logger = logging.getLogger("hongsu")
+    if not logger.handlers:
+        h = logging.StreamHandler()
+        h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s [%(request_id)s] %(message)s"))
+        h.addFilter(_RequestIdFilter())
+        logger.addHandler(h)
+    logger.setLevel(os.environ.get("LOG_LEVEL", "INFO").upper())
+    logger.propagate = False
+    return logger
+
+
+log = _setup_logging()
 
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 GEMINI_API_KEY    = os.environ.get("GEMINI_API_KEY", "")
@@ -89,13 +117,51 @@ def get_supabase():
         try:
             from supabase import create_client
             _supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-            print("  [Supabase] 연결 성공")
+            log.info("[Supabase] 연결 성공")
         except Exception as e:
-            print(f"  [Supabase] 연결 실패: {e}")
+            log.warning(f"[Supabase] 연결 실패: {e}")
     return _supabase
 
 app = Flask(__name__)
 executor = ThreadPoolExecutor(max_workers=4)
+
+
+def submit_with_context(fn, *args, **kwargs):
+    """executor.submit + 현재 컨텍스트(request_id) 복사."""
+    ctx = contextvars.copy_context()
+    return executor.submit(ctx.run, fn, *args, **kwargs)
+
+
+@app.before_request
+def _assign_request_id():
+    rid = (request.headers.get("X-Request-ID") or "").strip()[:64] or uuid.uuid4().hex[:12]
+    flask_g.request_id = rid
+    flask_g._rid_token = _request_id.set(rid)
+
+
+@app.after_request
+def _return_request_id(resp):
+    rid = getattr(flask_g, "request_id", None)
+    if rid:
+        resp.headers["X-Request-ID"] = rid
+    return resp
+
+
+@app.teardown_request
+def _clear_request_id(exc):
+    tok = getattr(flask_g, "_rid_token", None)
+    if tok is not None:
+        _request_id.reset(tok)
+
+
+@app.errorhandler(Exception)
+def _unhandled(e):
+    from werkzeug.exceptions import HTTPException
+    if isinstance(e, HTTPException):
+        return e
+    log.exception("[처리되지 않은 에러] %s %s", request.method, request.path)
+    return jsonify({"success": False, "error": f"{type(e).__name__}: {e}",
+                    "request_id": getattr(flask_g, "request_id", None)}), 500
 
 
 # ─── 공통 유틸 ─────
@@ -169,12 +235,12 @@ def call_mathpix(image_b64: str, mime_type: str = "image/jpeg") -> str:
             # 신뢰도 로그 (있으면)
             conf = data.get("confidence")
             if conf is not None:
-                print(f"  [Mathpix] confidence={conf:.2f}, {len(text)}자")
+                log.info(f"[Mathpix] confidence={conf:.2f}, {len(text)}자")
             return text
         else:
-            print(f"  [Mathpix 실패] HTTP {resp.status_code}: {resp.text[:120]}")
+            log.warning(f"[Mathpix 실패] HTTP {resp.status_code}: {resp.text[:120]}")
     except Exception as e:
-        print(f"  [Mathpix 실패] {e}")
+        log.warning(f"[Mathpix 실패] {e}")
     return ""
 
 
@@ -193,7 +259,7 @@ def call_gemini_ocr(image_b64: str, mime_type: str) -> dict:
         )
         return json.loads(response.text)
     except Exception as e:
-        print(f"  [Gemini OCR 실패] {e}")
+        log.warning(f"[Gemini OCR 실패] {e}")
         return {"steps": []}
 
 
@@ -280,16 +346,16 @@ def ocr_endpoint():
         image_b64 = data.get("image", "")
         mime_type = data.get("mime_type", "image/jpeg")
 
-        print(f"\n[OCR 요청] 이미지={len(image_b64)//1024}KB")
+        log.info(f"[OCR 요청] 이미지={len(image_b64)//1024}KB")
 
         # 병렬 실행
-        f_mathpix = executor.submit(call_mathpix, image_b64, mime_type)
-        f_gemini  = executor.submit(call_gemini_ocr, image_b64, mime_type)
+        f_mathpix = submit_with_context(call_mathpix, image_b64, mime_type)
+        f_gemini  = submit_with_context(call_gemini_ocr, image_b64, mime_type)
         mathpix_result = f_mathpix.result()
         gemini_result  = f_gemini.result()
 
-        print(f"  → Mathpix: {mathpix_result[:60]}")
-        print(f"  → Gemini: {json.dumps(gemini_result, ensure_ascii=False)[:100]}")
+        log.info(f"→ Mathpix: {mathpix_result[:60]}")
+        log.info(f"→ Gemini: {json.dumps(gemini_result, ensure_ascii=False)[:100]}")
 
         steps = gemini_result.get("steps", [])
         steps = [
@@ -304,11 +370,11 @@ def ocr_endpoint():
         })
 
     except Exception as e:
-        print(f"  [OCR 에러] {traceback.format_exc()}")
+        log.exception("[OCR 에러]")
         return jsonify({"success": False, "error": str(e)}), 500
 
     except Exception as e:
-        print(f"  [OCR 에러] {traceback.format_exc()}")
+        log.exception("[OCR 에러]")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -326,7 +392,7 @@ def refine_endpoint():
         current_text = data.get("current_text", "")
         user_instruction = data.get("instruction", "")
 
-        print(f"\n[수정 요청] instruction={user_instruction[:60]}")
+        log.info(f"[수정 요청] instruction={user_instruction[:60]}")
 
         prompt = p_refine.build(current_text=current_text, user_instruction=user_instruction)
 
@@ -349,11 +415,11 @@ def refine_endpoint():
         result["success"] = True
         result["timestamp"] = now_iso()
 
-        print(f"  [수정 완료] changes={result.get('changes')}, agreement={result.get('image_agreement')}")
+        log.info(f"[수정 완료] changes={result.get('changes')}, agreement={result.get('image_agreement')}")
         return jsonify(result)
 
     except Exception as e:
-        print(f"  [수정 에러] {traceback.format_exc()}")
+        log.exception("[수정 에러]")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -394,7 +460,7 @@ def grade_rv2_endpoint():
                             "error": "R v2는 확인된 OCR 텍스트로 채점합니다. /ocr → (/refine) 후 solution_steps로 보내세요."}), 400
 
         answer_id = f"A-{now_iso().replace(':','').replace('-','').replace('.','')[:15]}-{problem_id}"
-        print(f"\n[R v2 진단] {answer_id} mode={mode} status={input_status}")
+        log.info(f"[R v2 진단] {answer_id} mode={mode} status={input_status}")
 
         # 백지·판독 불가는 오류가 아니다 (판정 규칙 2) → LLM 호출 없이 기록
         if input_status in ("not_attempted", "unreadable") or not answer_text.strip():
@@ -419,6 +485,7 @@ def grade_rv2_endpoint():
         result = {
             "success": rec.get("error") is None,
             "answer_id": answer_id,
+            "request_id": getattr(flask_g, "request_id", None),   # 서버 로그 검색용
             "problem_id": problem_id,
             "student_id": student_id,
             "attempt_count": attempt_count,
@@ -444,6 +511,7 @@ def grade_rv2_endpoint():
             "xlsx_sha8": rec.get("xlsx_sha8"),
             "allowed_codes": rec.get("allowed_codes"),
             "model": rec.get("model"),
+            "response_models": rec.get("response_models", []),
             "timestamp": now_iso(),
             "n_calls": rec.get("n_calls"),
             "usage": rec.get("usage"),
@@ -462,14 +530,14 @@ def grade_rv2_endpoint():
         save_rv2_to_supabase({**result, "answer_text": rec.get("answer_text"),
                               "raw_responses": rec.get("raw_responses")})
 
-        print(f"  [R v2 완료] outcome={outcome} sources={review_sources} main={result['main_error_code']} J={result['justification_level']} "
+        log.info(f"[R v2 완료] outcome={outcome} sources={review_sources} main={result['main_error_code']} J={result['justification_level']} "
               f"complete={result['response_complete']} missing={result['missing_criteria']} "
               f"review={review_needed} calls={rec.get('n_calls')} issues={rec.get('validation_issues')}")
         status = 200 if result["success"] else 502
         return jsonify(result), status
 
     except Exception as e:
-        print(f"  [R v2 에러] {traceback.format_exc()}")
+        log.exception("[R v2 에러]")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -523,7 +591,7 @@ def master_solution_endpoint():
         })
 
     except Exception as e:
-        print(f"  [해설 에러] {traceback.format_exc()}")
+        log.exception("[해설 에러]")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -634,7 +702,7 @@ def measure_consistency_endpoint():
 
         runs = []
         for i in range(n_runs):
-            print(f"\n[일관성 측정 {i+1}/{n_runs}]")
+            log.info(f"[일관성 측정 {i+1}/{n_runs}]")
             # 채점 호출 (내부적으로 grade_endpoint 로직 재사용)
             # 여기서는 간단히 요청을 다시 보냄
             with app.test_client() as c:
@@ -661,7 +729,7 @@ def measure_consistency_endpoint():
         })
 
     except Exception as e:
-        print(f"  [일관성 측정 에러] {traceback.format_exc()}")
+        log.exception("[일관성 측정 에러]")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -680,7 +748,7 @@ def save_rv2_to_supabase(r: dict):
     """R v2 진단 1건 저장. 응답 원문(raw_responses)까지 저장. 실패해도 서버는 계속 동작."""
     sb = get_supabase()
     if not sb:
-        print("  [Supabase] 클라이언트 없음, R v2 저장 스킵")
+        log.warning("[Supabase] 클라이언트 없음, R v2 저장 스킵")
         return
     keys = ["answer_id", "problem_id", "student_id", "attempt_count", "mode", "input_status",
             "answer_text", "lines", "main_error_code", "justification_level", "math_result_correct",
@@ -692,9 +760,9 @@ def save_rv2_to_supabase(r: dict):
         # returning="minimal": RLS에서 insert만 허용(select 정책 없음)해도 저장되도록.
         # 기본값(representation)은 저장한 행을 다시 읽어 오므로 select 권한이 없으면 RLS 오류가 난다.
         sb.table("rv2_gradings").insert(row, returning="minimal").execute()
-        print(f"  [Supabase] rv2_gradings 저장 완료 ({r.get('answer_id')})")
+        log.info(f"[Supabase] rv2_gradings 저장 완료 ({r.get('answer_id')})")
     except Exception as e:
-        print(f"  [Supabase] rv2_gradings 저장 실패: {e}")
+        log.warning(f"[Supabase] rv2_gradings 저장 실패: {e}")
 
 
 def _gen_id():
@@ -748,7 +816,7 @@ def add_problem():
         "created_at": now_iso(),
     }
     _problems_db[pid] = problem
-    print(f"  [문제 추가] {pid}: {problem['title']}")
+    log.info(f"[문제 추가] {pid}: {problem['title']}")
     return jsonify({"success": True, "id": pid, "problem": problem})
 
 
@@ -771,7 +839,7 @@ def update_problem(pid):
         if key != "id":   # id는 변경 불가
             _problems_db[pid][key] = val
     _problems_db[pid]["updated_at"] = now_iso()
-    print(f"  [문제 수정] {pid}: {list(data.keys())}")
+    log.info(f"[문제 수정] {pid}: {list(data.keys())}")
     return jsonify({"success": True, "problem": _problems_db[pid]})
 
 
@@ -796,7 +864,7 @@ def bulk_add_problems():
         p["created_at"] = now_iso()
         _problems_db[pid] = p
         added.append(pid)
-    print(f"  [일괄 등록] {len(added)}개 문제")
+    log.info(f"[일괄 등록] {len(added)}개 문제")
     return jsonify({"success": True, "added_ids": added, "total": len(_problems_db)})
 
 
@@ -827,7 +895,7 @@ def save_result():
         "created_at": now_iso(),
     }
     _results_db[rid] = result
-    print(f"  [결과 저장] {rid}: problem={result['problem_id']}, correct={result['is_correct']}, "
+    log.info(f"[결과 저장] {rid}: problem={result['problem_id']}, correct={result['is_correct']}, "
           f"R={result['main_error_code']}, J={result['justification_level']}")
     return jsonify({"success": True, "result_id": rid})
 
@@ -907,7 +975,7 @@ def load_initial_problems():
     for p in rv2_codebook.problems_for_server_db():
         p["created_at"] = now_iso()
         _problems_db[p["id"]] = p
-    print(f"  [초기 문제 등록] 엑셀 {len(mats['problems'])}개 문항 로드 "
+    log.info(f"[초기 문제 등록] 엑셀 {len(mats['problems'])}개 문항 로드 "
           f"(R코드 {len(mats['r_codebook'])}개, 기준판정 {len(mats['line_judgment'])}줄, x{mats['xlsx_sha8']})")
 
 
