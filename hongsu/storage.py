@@ -1,10 +1,11 @@
 # coding: utf-8
-"""저장소: 문항·결과 인메모리 DB, Supabase rv2_gradings 저장, 엑셀 문항 로드.
+"""저장소: 문항·결과 인메모리 DB, rv2_gradings 저장, 엑셀 문항 로드.
 
-인메모리 DB는 서버 재시작 시 초기화된다. 채점 결과의 영구 저장은 Supabase(rv2_gradings).
+인메모리 DB는 서버 재시작 시 초기화된다. 채점 결과의 영구 저장은 rv2_gradings 테이블:
+DATABASE_URL이 있으면 PostgreSQL(Railway, hongsu/db.py), 없으면 Supabase.
 """
 import rv2_codebook
-from hongsu import clients
+from hongsu import clients, db
 from hongsu.logging_setup import log
 from hongsu.utils import now_iso
 
@@ -30,8 +31,19 @@ RV2_SAVE_KEYS_V13 = ["request_id", "outcome", "review_sources", "grader_version"
                      "response_models", "extraction", "first_issues"]
 
 
-def save_rv2_to_supabase(r: dict) -> None:
+def save_rv2(r: dict) -> None:
     """R v2 진단 1건 저장. 응답 원문(raw_responses)까지 저장. 실패해도 서버는 계속 동작."""
+    if db.enabled():
+        try:
+            db.insert_rv2({k: r.get(k) for k in RV2_SAVE_KEYS + RV2_SAVE_KEYS_V13})
+            log.info(f"[DB] rv2_gradings 저장 완료 ({r.get('answer_id')})")
+        except Exception as e:
+            log.warning(f"[DB] rv2_gradings 저장 실패: {type(e).__name__}: {e}")
+        return
+    save_rv2_to_supabase(r)
+
+
+def save_rv2_to_supabase(r: dict) -> None:
     sb = clients.get_supabase()
     if not sb:
         log.warning("[Supabase] 클라이언트 없음, R v2 저장 스킵")

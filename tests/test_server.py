@@ -132,3 +132,24 @@ def test_health_and_pages(env):
     assert j["checks"]["claude"]["ok"] is True and j["checks"]["supabase"]["ok"] is False
     for path in ("/student", "/admin", "/manifest.json"):
         assert c.get(path).status_code == 200
+
+
+def test_postgres_storage_when_database_url_set(env, monkeypatch):
+    """DATABASE_URL이 있으면 Postgres에 저장한다. DB에 못 붙어도 채점 응답은 나가고 /health가 알려 준다."""
+    import hongsu.db as db
+    monkeypatch.setattr(db, "DATABASE_URL", "postgresql://u:p@127.0.0.1:1/x")
+    monkeypatch.setattr(db, "_ready", False)
+    saved = []
+    monkeypatch.setattr(db, "insert_rv2", lambda row: saved.append(row))
+    r = env.client.post("/grade", json={"problem_id": "INV-R-01", "solution_text": ANSWER})
+    assert r.get_json()["success"] and saved and saved[0]["problem_id"] == "INV-R-01"
+    assert "raw_responses" in saved[0] and "outcome" in saved[0]
+    monkeypatch.undo()
+    monkeypatch.setattr(db, "DATABASE_URL", "postgresql://u:p@127.0.0.1:1/x")
+    monkeypatch.setattr(db, "_ready", False)
+    import hongsu.clients as clients
+    monkeypatch.setattr(clients, "get_claude", lambda: env.claude)
+    r = env.client.post("/grade", json={"problem_id": "INV-R-01", "solution_text": ANSWER})
+    assert r.get_json()["success"]          # 저장 실패해도 채점은 응답
+    j = env.client.get("/health?deep=1").get_json()
+    assert j["checks"]["db"]["ok"] is False and "supabase" not in j["checks"]

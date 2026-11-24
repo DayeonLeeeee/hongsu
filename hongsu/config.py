@@ -14,6 +14,9 @@ MATHPIX_APP_KEY = os.environ.get("MATHPIX_APP_KEY", "")
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
 
+# 채점 결과 저장소: DATABASE_URL(PostgreSQL, 예: Railway Postgres)이 있으면 그쪽, 없으면 Supabase
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
+
 # 진단 모델은 rv2_grader.RV2_MODEL (환경변수 RV2_MODEL). 아래는 OCR·수정용.
 MODEL_HAIKU  = "claude-haiku-4-5-20251001"
 MODEL_GEMINI = "gemini-2.5-flash"

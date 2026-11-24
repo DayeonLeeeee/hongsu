@@ -7,7 +7,7 @@ from flask.typing import ResponseReturnValue
 
 import rv2_codebook
 import rv2_grader
-from hongsu import clients
+from hongsu import clients, db
 from hongsu.config import ANTHROPIC_API_KEY, BASE_DIR
 from hongsu.utils import now_iso
 from prompts import rv2 as p_rv2
@@ -18,7 +18,7 @@ bp = Blueprint("system", __name__)
 @bp.route("/health", methods=["GET"])
 def health() -> ResponseReturnValue:
     """기본: 서버·코드북 상태만 (가벼움, 상태 점검용).
-    ?deep=1: Supabase 조회와 Claude API(모델 조회, 토큰 비용 없음)까지 확인. 하나라도 실패하면 503."""
+    ?deep=1: 결과 DB(Postgres 또는 Supabase) 조회와 Claude API(모델 조회, 토큰 비용 없음)까지 확인. 하나라도 실패하면 503."""
     m = rv2_codebook.get()
     body = {"status": "ok", "time": now_iso(), "version": p_rv2.PORT_VERSION,
             "grader_version": rv2_grader.GRADER_VERSION,
@@ -30,8 +30,10 @@ def health() -> ResponseReturnValue:
         return jsonify(body)
 
     checks = {}
-    sb = clients.get_supabase()
-    if sb is None:
+    sb = None if db.enabled() else clients.get_supabase()
+    if db.enabled():   # DATABASE_URL(Railway Postgres)에 저장 중
+        checks["db"] = db.check()
+    elif sb is None:
         checks["supabase"] = {"ok": False, "error": "클라이언트 없음 (SUPABASE_URL/KEY 확인)"}
     else:
         try:

@@ -117,8 +117,8 @@ def grade_rv2_endpoint() -> ResponseReturnValue:
         }
 
         # 응답 원문 포함 전체 저장 (원문은 응답 JSON에는 싣지 않음 — 용량)
-        storage.save_rv2_to_supabase({**result, "answer_text": rec.get("answer_text"),
-                              "raw_responses": rec.get("raw_responses")})
+        storage.save_rv2({**result, "answer_text": rec.get("answer_text"),
+                          "raw_responses": rec.get("raw_responses")})
 
         log.info(f"[R v2 완료] outcome={outcome} sources={review_sources} main={result['main_error_code']} J={result['justification_level']} "
               f"complete={result['response_complete']} missing={result['missing_criteria']} "

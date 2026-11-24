@@ -1,4 +1,5 @@
 -- rv2_gradings 테이블 새로 만들기 (새 Supabase 프로젝트용, 1.3 컬럼 포함)
+-- Railway Postgres(DATABASE_URL)를 쓰면 서버가 이 테이블을 알아서 만든다 (hongsu/db.py). 이 파일은 Supabase용.
 -- Supabase SQL Editor에서 1회 실행. 기존 프로젝트에 컬럼만 더할 때는 2026-11-24_rv2_gradings_add_columns.sql
 -- 서버(hongsu/storage.py save_rv2_to_supabase)가 넣는 키와 같다.
 
