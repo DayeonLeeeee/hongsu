@@ -251,3 +251,36 @@ def test_compare_runs_all_ids(expert, tmp_path):
                              "--title", "1-1b 재채점 비교"])
     assert out.startswith("# 1-1b 재채점 비교") and "다수결 판정이 달라진 답안: 0/3" in out
     assert "| A1 | 1.3 |" in out and "오세준" not in out
+
+
+def test_compare_runs_ignores_one_sided_answers(expert, tmp_path):
+    ans, res_path, _ = expert
+    after = tmp_path / "after.jsonl"
+    after.write_text(json.dumps(row("A1", 1, res("R6", 2)), ensure_ascii=False), encoding="utf-8")
+    out = compare_runs.main(["--before", res_path, "--after", str(after), "--before-answers", ans,
+                             "--after-answers", ans, "--ids", "A1,A2,A3"])
+    assert "다수결 판정이 달라진 답안: 1/1 (한쪽 결과가 없는 답안 2건 제외)" in out
+
+
+def test_run_py_flow(tmp_path, monkeypatch, expert, holdout):
+    """setup 없이 실행하면 안내 후 중단, 키트 위치를 기억하면 baseline이 돈다."""
+    import run as R
+    monkeypatch.setattr(R, "ANSWERS", str(tmp_path / "answers"))
+    monkeypatch.setattr(R, "KIT_PATH_FILE", str(tmp_path / "answers" / ".kit_path"))
+    monkeypatch.setattr(R, "OUT", str(tmp_path / "out"))
+    monkeypatch.delenv("RV2_KIT", raising=False)
+    with pytest.raises(SystemExit):
+        R.main(["status"])
+    kit = tmp_path / "kit"
+    (kit / "results").mkdir(parents=True)
+    (kit / "answers").mkdir()
+    import shutil
+    shutil.copy(expert[0], kit / "answers" / "expert_33.csv")
+    shutil.copy(holdout[0], kit / "answers" / "holdout45.csv")
+    shutil.copy(expert[1], kit / "results" / R.KIT_EXPERT_1111)
+    shutil.copy(holdout[1], kit / "results" / R.KIT_HOLDOUT_1111)
+    R.main(["setup", "--kit", str(kit)])
+    assert (tmp_path / "answers" / ".kit_path").read_text(encoding="utf-8").strip() == str(kit)
+    R.main(["baseline"])
+    outs = sorted(os.listdir(tmp_path / "out"))
+    assert len(outs) == 2 and outs[0].startswith("baseline_expert33") and outs[1].startswith("baseline_holdout45")

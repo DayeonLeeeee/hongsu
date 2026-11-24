@@ -5,3 +5,9 @@ __pycache__/
 # 봉인 데이터·학생 손글씨는 저장소에 올리지 않는다 (experiments/README.md)
 answers/holdout*
 answers/ocr/
+
+# 각자 PC의 키트 위치 (run.py setup이 기록)
+answers/.kit_path
+
+# macOS 가상환경
+.venv/

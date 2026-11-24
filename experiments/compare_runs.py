@@ -52,7 +52,7 @@ def main(argv=None):
              "판정 정의는 키트와 같다 (주 코드 = 반복 다수결, 첫 오류 줄 = matched_criterion).", "",
              "| answer_id | 구분 | 라벨 코드 | 라벨 첫 줄 | AI 회차별 | 다수결 | AI 첫 줄 (회차별) | J (회차별) | 코드 일치 |",
              "| --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
-    changed = 0
+    changed = both = 0
     for aid in ids:
         majs = []
         for tag, labels, runs in sides:
@@ -70,8 +70,11 @@ def main(argv=None):
                          f"{' / '.join(run_label(r) for r in recs)} | {maj} | "
                          f"{' / '.join('없음' if f is None else str(f) for f in firsts)} | {' / '.join(str(j) for j in js)} | "
                          f"{'일치' if K.is_match(maj, lab['code']) else '불일치'} |")
-        changed += int(len(majs) == 2 and majs[0] != majs[1])
-    lines += ["", f"다수결 판정이 달라진 답안: {changed}/{len(ids)}"]
+        if len(majs) == 2 and None not in majs:   # 양쪽 결과가 다 있는 답안만 비교
+            both += 1
+            changed += int(majs[0] != majs[1])
+    lines += ["", f"다수결 판정이 달라진 답안: {changed}/{both}"
+              + (f" (한쪽 결과가 없는 답안 {len(ids) - both}건 제외)" if both < len(ids) else "")]
     if args.title.startswith("1-4"):
         lines += ["", "변환 후 답안의 라벨은 오세준 교수님 확인 대상 (할 일: '수정한 5건과 통일한 라벨 확인')."]
     text = "\n".join(lines)
