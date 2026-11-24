@@ -10,3 +10,5 @@ ALTER TABLE rv2_gradings ADD COLUMN IF NOT EXISTS tool_choice     text;   -- too
 ALTER TABLE rv2_gradings ADD COLUMN IF NOT EXISTS response_models jsonb;  -- API가 실제로 응답한 모델 ID (호출별)
 ALTER TABLE rv2_gradings ADD COLUMN IF NOT EXISTS extraction      jsonb;  -- 호출별 결과 출처: tool / text / none
 ALTER TABLE rv2_gradings ADD COLUMN IF NOT EXISTS first_issues    jsonb;  -- 첫 호출의 정제·검증 사유
+ALTER TABLE rv2_gradings ADD COLUMN IF NOT EXISTS reveal_answer   boolean; -- 학생에게 정답을 공개했는지
+ALTER TABLE rv2_gradings ADD COLUMN IF NOT EXISTS feedback        jsonb;  -- 학생에게 보여 준 피드백

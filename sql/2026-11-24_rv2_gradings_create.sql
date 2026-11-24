@@ -47,7 +47,11 @@ CREATE TABLE IF NOT EXISTS rv2_gradings (
     tool_choice         text,          -- tool / auto
     response_models     jsonb,         -- API가 실제로 응답한 모델 ID (호출별)
     extraction          jsonb,         -- 호출별 결과 출처: tool / text / none
-    first_issues        jsonb          -- 첫 호출의 정제·검증 사유
+    first_issues        jsonb,         -- 첫 호출의 정제·검증 사유
+
+    -- 학생이 실제로 본 것
+    reveal_answer       boolean,       -- 정답 공개 여부 (공개 기준이 바뀌어도 당시 화면 복원용)
+    feedback            jsonb          -- 학생에게 보여 준 피드백
 );
 
 CREATE INDEX IF NOT EXISTS rv2_gradings_problem_idx ON rv2_gradings (problem_id);

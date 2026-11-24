@@ -28,7 +28,8 @@ RV2_SAVE_KEYS = ["answer_id", "problem_id", "student_id", "attempt_count", "mode
                  "validation_issues", "error", "prompt_version", "codebook_version", "xlsx_sha8",
                  "allowed_codes", "model", "n_calls", "usage", "stop_reasons", "raw_responses"]
 RV2_SAVE_KEYS_V13 = ["request_id", "outcome", "review_sources", "grader_version", "tool_choice",
-                     "response_models", "extraction", "first_issues"]
+                     "response_models", "extraction", "first_issues",
+                     "reveal_answer", "feedback"]   # 학생이 실제로 본 것 (공개 기준·피드백이 바뀌어도 복원 가능)
 
 
 def save_rv2(r: dict) -> None:

@@ -144,6 +144,7 @@ def test_postgres_storage_when_database_url_set(env, monkeypatch):
     r = env.client.post("/grade", json={"problem_id": "INV-R-01", "solution_text": ANSWER})
     assert r.get_json()["success"] and saved and saved[0]["problem_id"] == "INV-R-01"
     assert "raw_responses" in saved[0] and "outcome" in saved[0]
+    assert "reveal_answer" in saved[0] and "feedback" in saved[0]
     monkeypatch.undo()
     monkeypatch.setattr(db, "DATABASE_URL", "postgresql://u:p@127.0.0.1:1/x")
     monkeypatch.setattr(db, "_ready", False)
