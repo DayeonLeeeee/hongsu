@@ -8,7 +8,7 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04   # ubuntu-latest(26.04)에는 Python 3.9가 없다
     strategy:
       fail-fast: false
       matrix:
