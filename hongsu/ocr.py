@@ -8,6 +8,8 @@ from concurrent.futures import Future, ThreadPoolExecutor
 
 import requests as http_requests
 
+import usage_cost
+
 from hongsu import clients
 from hongsu.config import MATHPIX_APP_ID, MATHPIX_APP_KEY
 from hongsu.logging_setup import log
@@ -83,7 +85,15 @@ def call_gemini_ocr(image_b64: str, mime_type: str) -> dict:
             [instruction, {"mime_type": mime_type, "data": base64.b64decode(image_b64)}],
             generation_config={"response_mime_type": "application/json"},
         )
-        return json.loads(response.text)
+        usage = usage_cost.gemini_usage(response)   # 실패해도 토큰은 쓴 것이므로 먼저 잰다
+        try:
+            out = json.loads(response.text)
+        except (json.JSONDecodeError, ValueError):
+            log.warning("[Gemini OCR 실패] JSON 아님")
+            out = {"steps": []}
+        out = out if isinstance(out, dict) else {"steps": []}
+        out["_usage"] = usage
+        return out
     except Exception as e:
         log.warning(f"[Gemini OCR 실패] {e}")
         return {"steps": []}

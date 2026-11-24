@@ -49,7 +49,9 @@ class FakeClaude:
 
 class FakeGemini:
     def generate_content(self, parts, generation_config=None):
-        return SimpleNamespace(text=json.dumps({"steps": [{"index": 1, "text": "f(x)=\\sqrt{x}"}]}))
+        return SimpleNamespace(text=json.dumps({"steps": [{"index": 1, "text": "f(x)=\\sqrt{x}"}]}),
+                               usage_metadata=SimpleNamespace(prompt_token_count=1000, candidates_token_count=100,
+                                                              thoughts_token_count=300))
 
 
 @pytest.fixture()
@@ -369,3 +371,20 @@ def test_usage_endpoint_counts_grade_and_refine(env):
     kinds = {(r["kind"], r["requests"]) for r in u["process"]}
     assert ("grade", 1) in kinds and ("refine", 1) in kinds and u["db"] is None
     assert u["prices_checked"] and c.get("/admin/usage?days=0").status_code == 400
+
+
+def test_ocr_cost_counts_gemini_tokens_and_mathpix_requests(env, monkeypatch):
+    import usage_cost
+    from hongsu.routes import ocr as ocr_route
+    img = base64.b64encode(b"img").decode()
+    j = env.client.post("/ocr", json={"image": img}).get_json()
+    gemini = (1000 * 0.30 + (100 + 300) * 2.50) / 1_000_000          # thinking 토큰도 출력 요금
+    assert "_usage" not in j and j["cost_usd"] == pytest.approx(gemini)   # Mathpix 키 없음 → 부르지 않음
+    monkeypatch.setattr(ocr_route, "MATHPIX_APP_ID", "id")
+    monkeypatch.setattr(ocr_route, "MATHPIX_APP_KEY", "key")
+    monkeypatch.setattr(ocr_route.ocr_service, "call_mathpix", lambda *a: "$x$")
+    j = env.client.post("/ocr", json={"image": img}).get_json()
+    assert j["cost_usd"] == pytest.approx(gemini + 0.002)
+    rows = {r["model"]: r for r in usage_cost.snapshot() if r["kind"] == "ocr"}
+    assert rows["gemini-2.5-flash"]["requests"] == 2 and rows["gemini-2.5-flash"]["output_tokens"] == 800
+    assert rows["mathpix"]["requests"] == 1 and rows["mathpix"]["cost_usd"] == pytest.approx(0.002)

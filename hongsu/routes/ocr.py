@@ -8,7 +8,7 @@ from flask.typing import ResponseReturnValue
 import usage_cost
 from hongsu import clients
 from hongsu import ocr as ocr_service
-from hongsu.config import MAX_ANSWER_CHARS, MODEL_GEMINI, MODEL_HAIKU
+from hongsu.config import MATHPIX_APP_ID, MATHPIX_APP_KEY, MAX_ANSWER_CHARS, MODEL_GEMINI, MODEL_HAIKU
 from hongsu.guard import BadInput, get_str, json_body, rate_limited
 from hongsu.logging_setup import log
 from hongsu.utils import make_image_block, normalize_plain, now_iso, parse_tool_use
@@ -62,8 +62,17 @@ def ocr_endpoint() -> ResponseReturnValue:
         f_gemini  = ocr_service.submit_with_context(ocr_service.call_gemini_ocr, image_b64, mime_type)
         mathpix_result = f_mathpix.result()
         gemini_result  = f_gemini.result()
-        usage_cost.add("ocr", "mathpix", None, None)        # 호출 수만 센다 (토큰 단위 과금이 아님)
-        usage_cost.add("ocr", MODEL_GEMINI, None, None)
+        # 비용: Gemini는 토큰 단위, Mathpix는 요청 1건 단위 (usage_cost.py)
+        g_usage = gemini_result.pop("_usage", None)
+        g_cost = usage_cost.call_cost(MODEL_GEMINI, g_usage) if g_usage else None
+        usage_cost.add("ocr", MODEL_GEMINI, g_usage, g_cost)
+        m_cost = None
+        if MATHPIX_APP_ID and MATHPIX_APP_KEY:      # 키가 없으면 Mathpix를 부르지 않는다
+            m_cost = usage_cost.PER_REQUEST["mathpix"]
+            usage_cost.add("ocr", "mathpix", None, m_cost)
+        ocr_cost = round((g_cost or 0) + (m_cost or 0), 6) if g_cost is not None else None
+        log.info(f"[OCR 비용] gemini={g_usage} ${g_cost if g_cost is not None else '?'} "
+                 f"mathpix=${m_cost or 0}")
 
         log.info(f"→ Mathpix: {mathpix_result[:60]}")
         log.info(f"→ Gemini: {json.dumps(gemini_result, ensure_ascii=False)[:100]}")
@@ -77,6 +86,7 @@ def ocr_endpoint() -> ResponseReturnValue:
             "success": True,
             "steps": steps,
             "mathpix_raw": mathpix_result,
+            "cost_usd": ocr_cost,
             "timestamp": now_iso(),
         })
 
