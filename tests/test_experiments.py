@@ -279,8 +279,51 @@ def test_run_py_flow(tmp_path, monkeypatch, expert, holdout):
     shutil.copy(holdout[0], kit / "answers" / "holdout45.csv")
     shutil.copy(expert[1], kit / "results" / R.KIT_EXPERT_1111)
     shutil.copy(holdout[1], kit / "results" / R.KIT_HOLDOUT_1111)
+    (kit / "score_rv2.py").write_text("", encoding="utf-8")   # 키트 표식
     R.main(["setup", "--kit", str(kit)])
     assert (tmp_path / "answers" / ".kit_path").read_text(encoding="utf-8").strip() == str(kit)
     R.main(["baseline"])
     outs = sorted(os.listdir(tmp_path / "out"))
     assert len(outs) == 2 and outs[0].startswith("baseline_expert33") and outs[1].startswith("baseline_holdout45")
+
+
+def test_run_py_finds_nested_kit_and_rejects_repo(tmp_path, monkeypatch):
+    """zip을 '압축 풀기'하면 생기는 rv2_kit/rv2_kit는 안쪽을 찾고, 키트가 아닌 폴더는 멈춘다."""
+    import run as R
+    inner = tmp_path / "rv2_kit" / "rv2_kit"
+    (inner / "answers").mkdir(parents=True)
+    (inner / "answers" / "expert_33.csv").write_text("answer_id\n", encoding="utf-8")
+    (inner / "score_rv2.py").write_text("", encoding="utf-8")
+    assert R.find_kit(str(tmp_path / "rv2_kit")) == str(inner)
+    assert R.find_kit(str(inner)) == str(inner)
+    repo_like = tmp_path / "repo"
+    (repo_like / "answers").mkdir(parents=True)
+    (repo_like / "answers" / "expert_33.csv").write_text("answer_id\n", encoding="utf-8")
+    with pytest.raises(SystemExit):
+        R.find_kit(str(repo_like))
+
+
+def test_run_py_fixes_excel_saved_csv(tmp_path, monkeypatch):
+    """엑셀 cp949 저장: UTF-8로 바꾸고, 키트에서 온 칸('?'로 깨진 학생_답안, -1이 된 라벨)은 키트 원본으로 되돌리되
+    사람이 고친 '전문가_첫오류_통일'은 둔다. 사람이 쓴 통일 칸이 -1이면 멈춘다."""
+    import run as R
+    kit = tmp_path / "kit"
+    (kit / "answers").mkdir(parents=True)
+    (kit / "answers" / "expert_33.csv").write_text(
+        "answer_id,학생_답안,전문가_첫오류\nA-04-A,f⁻¹(5)=2,(1)\n", encoding="utf-8-sig")
+    ans = tmp_path / "answers"
+    ans.mkdir()
+    monkeypatch.setattr(R, "ANSWERS", str(ans))
+    monkeypatch.setattr(R, "ROOT", str(tmp_path))
+    monkeypatch.setattr(R, "KIT_PATH_FILE", str(ans / ".kit_path"))
+    monkeypatch.delenv("RV2_KIT", raising=False)
+    (ans / ".kit_path").write_text(str(kit), encoding="utf-8")
+    p = ans / "expert_33.csv"
+    p.write_bytes("answer_id,학생_답안,전문가_첫오류,전문가_첫오류_통일\nA-04-A,f?¹(5)=2,-1,2\n".encode("cp949"))
+    R.check_answer_csvs()
+    assert (ans / "expert_33.csv.cp949.bak").exists()
+    row = R.read_csv(str(p))[0]
+    assert row["학생_답안"] == "f⁻¹(5)=2" and row["전문가_첫오류"] == "(1)" and row["전문가_첫오류_통일"] == "2"
+    p.write_text("answer_id,학생_답안,전문가_첫오류,전문가_첫오류_통일\nA-04-A,f⁻¹(5)=2,(1),-2\n", encoding="utf-8-sig")
+    with pytest.raises(SystemExit):
+        R.check_answer_csvs()

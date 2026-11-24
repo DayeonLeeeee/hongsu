@@ -19,6 +19,7 @@ import datetime
 import glob
 import os
 import platform
+import re
 import subprocess
 import sys
 
@@ -70,9 +71,23 @@ def kit_dir(arg_kit=""):
     path = os.path.expanduser(path)
     if not path:
         stop("키트 위치를 모름. 먼저 실행: " + f'{PY} experiments/run.py setup --kit "<rv2_kit 폴더>"')
+    return find_kit(path)
+
+
+def find_kit(path):
+    """키트 폴더 확인. zip을 '압축 풀기'하면 rv2_kit/rv2_kit 처럼 한 겹 더 생기므로 안쪽도 찾아본다."""
     if not os.path.isdir(path):
         stop(f"키트 폴더가 없음: {path}")
-    return path
+    def is_kit(p):   # hongsu 저장소에도 answers/expert_33.csv가 생기므로 키트에만 있는 파일로 구분
+        return all(os.path.exists(os.path.join(p, m)) for m in (os.path.join("answers", "expert_33.csv"), "score_rv2.py"))
+    if is_kit(path):
+        return path
+    inner = [os.path.join(path, d) for d in sorted(os.listdir(path)) if is_kit(os.path.join(path, d))]
+    if len(inner) == 1:
+        say(f"(키트가 한 겹 안쪽에 있음 → {inner[0]})")
+        return inner[0]
+    stop(f"키트 폴더가 아님 (answers/expert_33.csv 없음): {path}\n"
+         "  → zip을 푼 뒤 answers, materials, results 폴더가 바로 보이는 폴더를 --kit으로 줄 것")
 
 
 def kit_result(kit, name):
@@ -91,6 +106,80 @@ def need(path, how):
 def read_csv(path):
     with open(path, encoding="utf-8-sig") as f:
         return list(csv.DictReader(f))
+
+
+def _kit_soft():
+    """기억한 키트 위치 (없으면 None, 멈추지 않음)."""
+    path = os.environ.get("RV2_KIT", "")
+    if not path and os.path.exists(KIT_PATH_FILE):
+        with open(KIT_PATH_FILE, encoding="utf-8") as f:
+            path = f.read().strip()
+    path = os.path.expanduser(path)
+    return path if path and os.path.isdir(path) else None
+
+
+def _write_csv(path, rows, fields):
+    with open(path, "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=fields)
+        w.writeheader()
+        w.writerows(rows)
+
+
+def check_answer_csvs():
+    """answers/의 CSV를 엑셀로 열어 저장했을 때 생기는 문제를 실험 전에 잡는다.
+    - 한국어 Windows 엑셀의 일반 'CSV(쉼표로 분리)' 저장은 cp949라 f⁻¹의 '⁻' 같은 글자가 '?'로 바뀐다.
+      → UTF-8(BOM)로 바꾸고 원본은 .cp949.bak으로 남긴다.
+    - expert_33·holdout45는 키트에서 온 열(학생_답안, 라벨)을 키트 원본으로 되돌린다.
+      사람이 고치는 열은 expert_33의 '전문가_첫오류_통일' 하나뿐이므로 그 열만 그대로 둔다.
+    - 엑셀은 '(1)'을 회계 음수 -1로 바꾼다 → 첫 오류 라벨이 조용히 '없음'이 되므로 멈춘다.
+    - 그 밖의 파일(converted_5 등)은 사람이 쓴 내용이라 되돌릴 원본이 없다 → '?'가 생긴 칸을 알려 준다."""
+    kit = _kit_soft()
+    paths = glob.glob(os.path.join(ANSWERS, "*.csv")) + glob.glob(os.path.join(ANSWERS, "ocr", "*.csv"))
+    for path in paths:
+        rel = os.path.relpath(path, ROOT)
+        with open(path, "rb") as f:
+            raw = f.read()
+        was_cp949 = False
+        try:
+            raw.decode("utf-8")
+        except UnicodeDecodeError:
+            try:
+                text = raw.decode("cp949")
+            except UnicodeDecodeError:
+                stop(f"{rel}: 글자 인코딩을 읽을 수 없음. 엑셀에서 'CSV UTF-8(쉼표로 분리)'로 다시 저장할 것")
+            os.replace(path, path + ".cp949.bak")
+            with open(path, "w", encoding="utf-8-sig", newline="") as f:
+                f.write(text)
+            was_cp949 = True
+            say(f"(엑셀 일반 CSV(cp949) 저장 → UTF-8로 바꿈: {rel}, 원본은 .cp949.bak)")
+        rows = read_csv(path)
+        if not rows:
+            continue
+        fields = list(rows[0].keys())
+        name = os.path.basename(path)
+        kit_csv = os.path.join(kit, "answers", name) if kit else ""
+        if name in ("expert_33.csv", "holdout45.csv") and kit_csv and os.path.exists(kit_csv):
+            orig = {r["answer_id"]: r for r in read_csv(kit_csv)}
+            fixed = set()
+            for r in rows:
+                o = orig.get(r.get("answer_id"))
+                for k, v in (o or {}).items():
+                    if k in r and r[k] != v:
+                        r[k] = v
+                        fixed.add(r["answer_id"])
+            if fixed:
+                _write_csv(path, rows, fields)
+                say(f"({rel}: 키트에서 온 칸이 바뀌어 있어 키트 원본으로 되돌림 — {sorted(fixed)}. "
+                    "'전문가_첫오류_통일' 열은 그대로)")
+        elif was_cp949:
+            q = [r.get("answer_id", "?") for r in rows if any("?" in (v or "") for v in r.values())]
+            if q:
+                say(f"주의: {rel}에서 '?'가 있는 행 {q} — 엑셀 저장 중 ⁻¹ 같은 글자가 '?'로 바뀌었을 수 있음. 확인할 것")
+        bad = [f"{r.get('answer_id', '?')} {k}={v.strip()}" for r in rows for k, v in r.items()
+               if k and "첫오류" in k and re.fullmatch(r"\s*-\d+\s*", v or "")]
+        if bad:
+            stop(f"{rel}: 엑셀이 '(1)' 같은 라벨을 음수로 바꾼 것으로 보임\n  "
+                 + "\n  ".join(bad) + "\n  → 해당 칸을 숫자 하나(예: 1)로 고쳐 저장할 것 (메모장·VS Code로 열면 안전)")
 
 
 def report(argv, name):
@@ -162,8 +251,7 @@ def cmd_setup(a):
     kit = os.path.expanduser(a.kit or os.environ.get("RV2_KIT", ""))
     if not kit:
         stop(f'키트 위치를 줘야 함: {PY} experiments/run.py setup --kit "<rv2_kit 폴더>"')
-    if not os.path.isdir(kit):
-        stop(f"키트 폴더가 없음: {kit}")
+    kit = find_kit(kit)
     os.makedirs(ANSWERS, exist_ok=True)
     with open(KIT_PATH_FILE, "w", encoding="utf-8") as f:
         f.write(os.path.abspath(kit))
@@ -196,7 +284,10 @@ def cmd_status(a):
         rows = read_csv(exp)
         changed = [r["answer_id"] for r in rows if r.get("전문가_첫오류_통일", "") != r.get("전문가_첫오류", "")]
         say(f"{mark(bool(changed))}1-2 라벨 통일: 고친 답안 {len(changed)}건 {changed}")
-        say("     할 일: answers/expert_33.csv의 '전문가_첫오류_통일'에서 A-01-A, A-01-B, A-04-A, A-04-B를 기준표 번호로")
+        if changed:
+            say(f"     → {PY} experiments/run.py 1-2")
+        else:
+            say("     할 일: answers/expert_33.csv의 '전문가_첫오류_통일'에서 A-01-A, A-01-B, A-04-A, A-04-B를 기준표 번호로")
     else:
         say(f"-- 1-2: answers/expert_33.csv 없음 → {PY} experiments/run.py setup")
 
@@ -324,6 +415,8 @@ def main(argv=None):
             stream.reconfigure(encoding="utf-8")
         except (AttributeError, ValueError):
             pass
+    if a.command != "setup":
+        check_answer_csvs()
     {"setup": cmd_setup, "status": cmd_status, "baseline": cmd_baseline, "1-2": cmd_1_2,
      "1-1b": cmd_1_1b, "1-4": cmd_1_4, "1-8": cmd_1_8}[a.command](a)
 

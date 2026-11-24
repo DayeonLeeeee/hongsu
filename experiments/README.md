@@ -14,35 +14,46 @@
 
 ## 0. 준비 (처음 한 번)
 
+받는 것은 두 가지다: **GitHub 저장소**(https://github.com/DayeonLeeeee/hongsu, `stabilize` 브랜치)와 **`rv2_kit.zip`**.
+
+미리 설치할 것
+- Python 3.9 이상 (python.org). Windows는 설치 첫 화면에서 **"Add python.exe to PATH"** 체크. 설치 후 새 창에서 `python --version`이 버전을 보여야 한다 (Microsoft Store가 뜨면 PATH가 안 잡힌 것).
+- Git (git-scm.com). macOS는 처음 `git`을 치면 설치 창이 뜬다. Git 없이 하려면 GitHub에서 브랜치를 `stabilize`로 바꾼 뒤 **Code → Download ZIP** (이 경우 아래 `git clone` 줄 대신 압축을 풀고 그 폴더로 `cd`).
+
+키트 zip 풀기
+- 아무 데나 풀면 된다. 풀고 나서 `answers`, `materials`, `results` 폴더가 바로 보이는 폴더가 키트 폴더다. "압축 풀기"로 `rv2_kit\rv2_kit`처럼 한 겹 더 생겨도 `setup`이 안쪽을 찾는다.
+- 키트 폴더를 hongsu 폴더 안에 넣지 않는다.
+
 ### Windows (PowerShell)
 ```powershell
-cd <hongsu 폴더>
-git checkout stabilize
-git pull
+cd ~\Desktop                                   # 저장소를 받을 곳
+git clone -b stabilize https://github.com/DayeonLeeeee/hongsu.git
+cd hongsu
 python -m pip install -r requirements.txt pytest
-python -m pytest tests -q
+python -m pytest tests -q                       # 전부 passed 여야 한다
 
-$env:PYTHONUTF8 = "1"                          # 창을 새로 열 때마다 (한글 cp949 오류 방지)
-$env:ANTHROPIC_API_KEY = "sk-ant-..."         # 새 채점(1-1b, 1-4)할 때만
+$env:ANTHROPIC_API_KEY = "sk-ant-..."         # 새 채점(1-1b, 1-4)할 때만. 창을 새로 열 때마다
 
-python experiments/run.py setup --kit "C:\Users\USER\Desktop\연구\rv2_kit"
+python experiments/run.py setup --kit "C:\Users\<사용자>\Downloads\rv2_kit"   # 키트를 푼 실제 위치로
 python experiments/run.py status
 ```
 
 ### macOS (터미널, zsh)
 ```bash
-cd <hongsu 폴더>
-git checkout stabilize
-git pull
-python3 -m venv .venv && source .venv/bin/activate   # 처음 한 번. 이후 터미널을 열 때마다 source만
+cd ~/Desktop                                    # 저장소를 받을 곳
+git clone -b stabilize https://github.com/DayeonLeeeee/hongsu.git
+cd hongsu
+python3 -m venv .venv && source .venv/bin/activate   # 처음 한 번. 이후 터미널을 열 때마다 cd hongsu 후 source만
 python3 -m pip install -r requirements.txt pytest
-python3 -m pytest tests -q
+python3 -m pytest tests -q                      # 전부 passed 여야 한다
 
-export ANTHROPIC_API_KEY="sk-ant-..."                # 새 채점(1-1b, 1-4)할 때만
+export ANTHROPIC_API_KEY="sk-ant-..."                # 새 채점(1-1b, 1-4)할 때만. 창을 새로 열 때마다
 
-python3 experiments/run.py setup --kit ~/Desktop/연구/rv2_kit   # 키트를 둔 실제 위치로
+python3 experiments/run.py setup --kit ~/Downloads/rv2_kit   # 키트를 푼 실제 위치로
 python3 experiments/run.py status
 ```
+
+이미 받아 둔 저장소를 최신으로 할 때: `cd hongsu` → `git checkout stabilize` → `git pull`.
 
 - `setup`은 키트 위치를 `answers/.kit_path`에 기억한다. 이후 명령에는 `--kit`을 안 줘도 된다 (각자 PC에만 있고 저장소에는 안 올라간다).
 - `setup`이 만드는 답안 파일 (이미 있으면 덮어쓰지 않는다. 새로 만들려면 `--force`, 고친 라벨이 지워지니 주의):
@@ -54,6 +65,7 @@ python3 experiments/run.py status
 | `answers/converted_5.csv` | 1-4용 틀 (`원래_답안`에 원문, `학생_답안` 빈칸) | 올려도 됨 |
 
 - 키트 원본 파일은 건드리지 않는다. 라벨 수정은 `answers/` 사본에서만 한다.
+- `answers/`의 CSV는 **메모장이나 VS Code로 고치는 게 안전하다**. 엑셀로 고칠 때는 "다른 이름으로 저장 → CSV UTF-8(쉼표로 분리)"로 저장한다. 엑셀은 `(1)` 같은 라벨을 `-1`로 바꾸므로, 그런 칸이 있으면 `run.py`가 멈추고 어느 칸인지 알려 준다. 엑셀의 일반 CSV(cp949)로 저장한 파일은 `run.py`가 UTF-8로 바꿔 쓴다 (원본은 `.cp949.bak`).
 - 키트는 macOS 사용자도 같은 폴더 구조(`rv2_kit/answers`, `rv2_kit/results`)로 받아 두면 된다. 11/11 결과 파일 두 개(`stage3_expert_33_opus55_20261111_1422.jsonl`, `stage3_holdout45_opus55_20261111_1531.jsonl`)가 `results/`에 있어야 한다.
 
 `status`는 지금 돌릴 수 있는 실험과 사람이 할 일(라벨 몇 건 고쳤는지, 변환 답안 몇 건 썼는지, 손글씨 몇 장인지)을 보여 준다.
@@ -183,6 +195,14 @@ python experiments/run.py 1-8 --engines gemini,claude # 일부 엔진만
 ```
 
 ---
+
+## 돌린 뒤 돌려줄 것
+
+- `experiments/out/` 폴더 전체 (보고서 .md)
+- `results/` 폴더의 이번에 새로 생긴 `stage3_*.jsonl` (1-1b, 1-4 채점 원본)
+- `answers/expert_33.csv`, `answers/converted_5.csv` (고친 라벨·변환 답안)
+
+이 파일들을 zip으로 묶어 직접 전달한다. **저장소에 커밋·push하지 않는다** (holdout 답안과 채점 결과가 들어 있다).
 
 ## 보고서 읽는 법 / 정의
 
