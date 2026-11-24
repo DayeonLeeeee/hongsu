@@ -31,6 +31,10 @@ def load_answers(path: str, include_all: bool) -> list:
         rows = list(csv.DictReader(f))
     if rows and "상태" in rows[0] and not include_all:
         rows = [r for r in rows if r["상태"].strip() == "유효"]
+    blank = [r["answer_id"] for r in rows if not (r.get("학생_답안") or "").strip()]
+    if blank:  # 아직 안 채운 틀(예: 1-4 변환 답안)을 돌려 빈 답안에 비용을 쓰지 않도록
+        print(f"학생_답안이 비어 있어 건너뜀: {', '.join(blank)}")
+        rows = [r for r in rows if (r.get("학생_답안") or "").strip()]
     return rows
 
 
@@ -111,7 +115,8 @@ def main():
                          f"main={res.get('main_error_code')} J={res.get('justification_level')} "
                          f"complete={res.get('response_complete')} missing={res.get('missing_criteria')}"))
                 time.sleep(0.3)
-    print(f"완료. 채점: python score_rv2.py --results {out_path} --answers {args.answers}")
+    print(f"완료. 분석: python experiments/score_experiments.py --results {out_path} --answers {args.answers}")
+    print("      (키트 일치율 계산: python score_rv2.py --results <위 파일> --answers <답안 CSV>)")
 
 
 if __name__ == "__main__":
