@@ -22,6 +22,7 @@ import json
 import os
 import sys
 import time
+from typing import Any
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -31,12 +32,17 @@ def load_answers(path: str, include_all: bool) -> list:
         rows = list(csv.DictReader(f))
     if rows and "상태" in rows[0] and not include_all:
         rows = [r for r in rows if r["상태"].strip() == "유효"]
+    blank = [r["answer_id"] for r in rows if not (r.get("학생_답안") or "").strip()]
+    if blank:  # 아직 안 채운 틀(예: 1-4 변환 답안)을 돌려 빈 답안에 비용을 쓰지 않도록
+        print(f"학생_답안이 비어 있어 건너뜀: {', '.join(blank)}")
+        rows = [r for r in rows if (r.get("학생_답안") or "").strip()]
     return rows
 
 
-def grade_local(client, row: dict) -> dict:
+def grade_local(client: Any, row: dict) -> dict:
     import rv2_grader
     rec = rv2_grader.diagnose(client, row["problem_id"], row["학생_답안"], mode="with_codebook")
+    rec["outcome"], rec["review_sources"] = rv2_grader.classify_outcome(rec)
     rec.pop("answer_text", None)
     return rec
 
@@ -52,16 +58,22 @@ def grade_remote(url: str, row: dict) -> dict:
                    "input_status", "review_needed", "review_reason", "response_complete", "missing_criteria"]
     return {
         "model": d.get("model"), "prompt_version": d.get("prompt_version"),
+        "grader_version": d.get("grader_version"), "git_commit": d.get("git_commit"),
+        "response_models": d.get("response_models"),
         "codebook_version": d.get("codebook_version"), "xlsx_sha8": d.get("xlsx_sha8"),
         "allowed_codes": d.get("allowed_codes"), "usage": d.get("usage"), "n_calls": d.get("n_calls"),
+        "cost_usd": d.get("cost_usd"),
         "stop_reasons": d.get("stop_reasons"), "validation_issues": d.get("validation_issues"),
+        "tool_choice": d.get("tool_choice"), "extraction": d.get("extraction"),
+        "first_issues": d.get("first_issues"),
+        "outcome": d.get("outcome"), "review_sources": d.get("review_sources"),
         "error": d.get("error") or (None if d.get("success") else f"HTTP {resp.status_code}"),
         "server_answer_id": d.get("answer_id"),
         "result": {k: d.get(k) for k in result_keys} if d.get("lines") is not None else None,
     }
 
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--answers", required=True)
     ap.add_argument("--repeats", type=int, default=3)
@@ -77,7 +89,9 @@ def main():
         import anthropic
         import rv2_codebook
         import rv2_grader
-        client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+        client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
+                                     max_retries=int(os.environ.get("CLAUDE_MAX_RETRIES", "2")),
+                                     timeout=float(os.environ.get("CLAUDE_TIMEOUT_S", "120")))
         model, cbv = rv2_grader.RV2_MODEL, rv2_codebook.get().get("codebook_version")
     else:
         model, cbv = "server", "server"
@@ -104,7 +118,8 @@ def main():
                          f"main={res.get('main_error_code')} J={res.get('justification_level')} "
                          f"complete={res.get('response_complete')} missing={res.get('missing_criteria')}"))
                 time.sleep(0.3)
-    print(f"완료. 채점: python score_rv2.py --results {out_path} --answers {args.answers}")
+    print(f"완료. 분석: python experiments/score_experiments.py --results {out_path} --answers {args.answers}")
+    print("      (키트 일치율 계산: python score_rv2.py --results <위 파일> --answers <답안 CSV>)")
 
 
 if __name__ == "__main__":

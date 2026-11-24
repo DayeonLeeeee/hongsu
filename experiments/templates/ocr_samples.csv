@@ -1,0 +1,3 @@
+sample_id,image,problem_id,정답_텍스트,교정검사
+S-01,images/S-01.jpg,INV-R-05,"① f(-2)=5
+② 따라서 역함수는 없다",f(-2)=5

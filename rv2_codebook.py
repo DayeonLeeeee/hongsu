@@ -15,6 +15,7 @@ hongsu-rv2-1.2: codebook_version을 하드코딩("R-v2")하지 않고 엑셀 00_
 import hashlib
 import os
 import re
+from typing import Any, Dict, Optional
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 XLSX_PATH = os.environ.get("RV2_XLSX", os.path.join(BASE_DIR, "materials", "dataset_rv2.xlsx"))
@@ -33,7 +34,7 @@ README_SHEET = "00_README"
 _mats = None
 
 
-def _cell(v) -> str:
+def _cell(v: Any) -> str:
     if v is None:
         return ""
     if isinstance(v, float) and v.is_integer():
@@ -41,7 +42,7 @@ def _cell(v) -> str:
     return str(v)
 
 
-def _read_sheet(wb, name: str) -> list:
+def _read_sheet(wb: Any, name: str) -> list:
     ws = wb[name]
     rows = list(ws.iter_rows(values_only=True))
     if not rows:
@@ -55,7 +56,7 @@ def _read_sheet(wb, name: str) -> list:
     return out
 
 
-def _codebook_version(wb) -> str:
+def _codebook_version(wb: Any) -> str:
     """00_README 시트의 '코드북' 행(예: 'R-v3 · 내용 오류 R1–R11 …')에서 버전 문자열을 뽑는다."""
     if README_SHEET not in wb.sheetnames:
         return "unknown"
@@ -67,7 +68,7 @@ def _codebook_version(wb) -> str:
     return "unknown"
 
 
-def load(path: str = None) -> dict:
+def load(path: Optional[str] = None) -> dict:
     """엑셀을 읽어 키트 materials.json과 같은 구조의 dict를 만든다."""
     import openpyxl
     path = path or XLSX_PATH
@@ -77,7 +78,7 @@ def load(path: str = None) -> dict:
     missing = [s for s in SHEETS.values() if s not in wb.sheetnames]
     if missing:
         raise ValueError(f"엑셀에 필요한 시트가 없음: {missing}")
-    mats = {key: _read_sheet(wb, sheet) for key, sheet in SHEETS.items()}
+    mats: Dict[str, Any] = {key: _read_sheet(wb, sheet) for key, sheet in SHEETS.items()}
     mats["codebook_version"] = _codebook_version(wb)
     wb.close()
     mats["xlsx_sha8"] = digest          # 재현성: 어떤 엑셀로 채점했는지
@@ -98,11 +99,10 @@ def reload() -> dict:
     return _mats
 
 
+# 문항·기준표 조회는 prompts/rv2.py의 함수 하나로 (프롬프트와 서버가 같은 규칙을 쓰도록)
 def problem(problem_id: str) -> dict:
-    for p in get()["problems"]:
-        if p.get("problem_id") == problem_id:
-            return p
-    raise KeyError(f"problem_id not found: {problem_id}")
+    from prompts import rv2 as p_rv2
+    return p_rv2._problem(get(), problem_id)
 
 
 def has_problem(problem_id: str) -> bool:
@@ -110,15 +110,14 @@ def has_problem(problem_id: str) -> bool:
 
 
 def lines_for(problem_id: str) -> list:
-    return [r for r in get()["line_judgment"] if r.get("problem_id") == problem_id]
+    from prompts import rv2 as p_rv2
+    return p_rv2._lines_for(get(), problem_id)
 
 
 def allowed_codes(problem_id: str) -> list:
     """키트 prompt_builder.allowed_codes()와 동일."""
-    codes = set(re.findall(r"R\d+", problem(problem_id).get("주_R코드", "")))
-    for r in lines_for(problem_id):
-        codes |= set(re.findall(r"R\d+", r.get("wrong일_때", "") or ""))
-    return sorted(codes, key=lambda c: int(c[1:]))
+    from prompts import rv2 as p_rv2
+    return p_rv2.allowed_codes(get(), problem_id)
 
 
 def problems_for_server_db() -> list:
