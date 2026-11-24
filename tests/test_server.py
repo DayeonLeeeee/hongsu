@@ -66,6 +66,8 @@ def env(monkeypatch):
     guard.reset()   # 요청 횟수 카운터는 테스트마다 새로
     import usage_cost
     usage_cost.reset()
+    from hongsu import storage
+    storage._pending.clear()   # DB 보류 행도 테스트마다 비운다
     return SimpleNamespace(client=hongsu_server.app.test_client(), app=hongsu_server.app, claude=fake)
 
 
