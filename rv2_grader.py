@@ -75,7 +75,7 @@ if RV2_TOOL_CHOICE not in ("tool", "auto"):
     RV2_TOOL_CHOICE = _defaults["tool_choice"]
 
 # 채점 동작(정제·검증·재시도 로직) 버전. 프롬프트가 같아도 이 값이 다르면 결과를 직접 비교하지 않는다.
-GRADER_VERSION = "rv2-grader-1.3"
+GRADER_VERSION = "rv2-grader-1.4"   # 1.4: 미완 답안의 R3를 검증에서 거른다 (CHANGELOG)
 
 USAGE_KEYS = ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
 
@@ -349,6 +349,10 @@ def validate(parsed: dict, answer_text: str, allowed: list, with_codes: bool,
         mec = parsed.get("main_error_code")
         if mec and mec not in allowed:
             issues.append(f"main_error_code 허용 밖: {mec}")
+    # 1.4: 중간에 멈춘(미완) 답안에는 R3를 붙이지 않는다 (계획 문서 라벨·데이터 작업 2번, R-v3 규칙 12).
+    # 고치지 않고 사유를 붙여 재시도 → 그래도 남으면 검수로 간다.
+    if with_codes and parsed.get("response_complete") is False and parsed.get("main_error_code") == "R3":
+        issues.append("미완 답안(response_complete=false)에 R3를 붙임 — 미완 답안은 R3 대신 코드 없이 미완으로 기록할 것")
     if criteria_nos:
         bad = [n for n in (parsed.get("missing_criteria") or []) if n not in criteria_nos]
         if bad:

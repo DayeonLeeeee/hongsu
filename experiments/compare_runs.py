@@ -35,12 +35,13 @@ def main(argv=None):
     ap.add_argument("--before-tag", default="변환 전")
     ap.add_argument("--after-tag", default="변환 후")
     ap.add_argument("--title", default="1-4 설명문형 답안 변환 전/후 비교")
+    ap.add_argument("--code-col", default="", help="주 코드 라벨을 이 열에서 읽기 (열이 있는 답안 파일만, 예: 전문가_코드_통일)")
     ap.add_argument("--out", default="")
     args = ap.parse_args(argv)
 
     sides = []
     for tag, res, ans in ((args.before_tag, args.before, args.before_answers), (args.after_tag, args.after, args.after_answers)):
-        _, labels = load_labels(ans)
+        _, labels = load_labels(ans, code_col=args.code_col, code_col_optional=True)
         runs = group_runs(load_results(res), labels)
         sides.append((tag, labels, runs))
     if args.ids.strip().lower() == "all":   # 양쪽에 결과가 있는 답안 전부 (재채점 전후 비교용)

@@ -193,14 +193,38 @@ def test_prepare_answers_from_xlsx_matches_kit_columns(tmp_path):
     prepare_answers.main(["--out-dir", str(tmp_path)])
     with open(tmp_path / "expert_33.csv", encoding="utf-8-sig") as f:
         rows = list(csv.DictReader(f))
-    assert len(rows) == 33 and list(rows[0].keys()) == prepare_answers.KIT_COLS + [prepare_answers.UNIFIED_COL]
+    assert len(rows) == 33 and list(rows[0].keys()) == (prepare_answers.KIT_COLS
+                                                        + [prepare_answers.UNIFIED_COL, prepare_answers.UNIFIED_CODE_COL])
     assert all(r[prepare_answers.UNIFIED_COL] == r["전문가_첫오류"] for r in rows)
+    assert all(r[prepare_answers.UNIFIED_CODE_COL] == r["전문가_코드"] for r in rows)
     kind, labels = K.load_labels(str(tmp_path / "expert_33.csv"), True)
     assert kind == "expert" and labels["A-01-A"]["code"] == "R8" and labels["A-01-A"]["first"] == 1
     with open(tmp_path / "converted_5.csv", encoding="utf-8-sig") as f:
         conv = list(csv.DictReader(f))
     assert [r["answer_id"] for r in conv] == prepare_answers.CONVERTED_IDS.split(",")
     assert all(r["학생_답안"] == "" and r["원래_답안"] for r in conv)
+    assert all(r[prepare_answers.UNIFIED_CODE_COL] == r["전문가_코드"] for r in conv)
+
+
+def test_code_col_marks_incomplete_and_changes_match(expert, tmp_path):
+    """전문가_코드_통일에서 '미완'은 코드 없음 + 미완. 원래 라벨 열은 그대로 두고 통일 열만 읽는다."""
+    import score_experiments as S
+    src = expert[0]
+    with open(src, encoding="utf-8-sig") as f:
+        rows = list(csv.DictReader(f))
+    for r in rows:
+        r["전문가_코드_통일"] = "미완" if r["answer_id"] == rows[0]["answer_id"] else r.get("전문가_코드", "")
+    p = tmp_path / "e.csv"
+    with open(p, "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=list(rows[0].keys())); w.writeheader(); w.writerows(rows)
+    _, orig = S.load_labels(str(p))
+    _, uni = S.load_labels(str(p), code_col="전문가_코드_통일")
+    aid = rows[0]["answer_id"]
+    assert uni[aid]["code"] is None and uni[aid]["incomplete"] is True
+    assert all(uni[a]["code"] == orig[a]["code"] for a in orig if a != aid)
+    with pytest.raises(SystemExit):
+        S.load_labels(str(src), code_col="없는열")
+    assert S.load_labels(str(src), code_col="없는열", code_col_optional=True)[1] == S.load_labels(str(src))[1]
 
 
 def test_run_batch_skips_blank_answers(tmp_path):

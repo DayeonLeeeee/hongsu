@@ -73,16 +73,32 @@ def load_results(paths):
     return rows
 
 
-def load_labels(path, v3_relabel=True, first_col=""):
-    """키트 load_labels + (선택) 첫 오류 라벨 열 바꾸기 (라벨 통일본 열을 따로 둔 경우)."""
+CODE_UNIFIED_COL = "전문가_코드_통일"
+
+
+def load_labels(path, v3_relabel=True, first_col="", code_col="", code_col_optional=False):
+    """키트 load_labels + (선택) 라벨 통일본 열로 바꾸기.
+    first_col: 첫 오류 줄 (예: 전문가_첫오류_통일)
+    code_col:  주 코드 (예: 전문가_코드_통일). 값 'Rk' = 코드, '없음'·빈칸 = 코드 없음, '미완' = 코드 없음 + 미완.
+    code_col_optional: 열이 없으면 원래 라벨 그대로 (변환 답안 파일처럼 열이 없을 수 있는 경우)."""
     kind, labels = K.load_labels(path, v3_relabel)
-    if first_col:
+    if first_col or code_col:
         with open(path, encoding="utf-8-sig") as f:
             rows = {r["answer_id"]: r for r in csv.DictReader(f)}
-        if rows and first_col not in next(iter(rows.values())):
-            raise SystemExit(f"답안 CSV에 열이 없음: {first_col}")
-        for aid, lab in labels.items():
-            lab["first"] = K.to_int(rows.get(aid, {}).get(first_col))
+        cols = next(iter(rows.values())).keys() if rows else []
+        if first_col:
+            if first_col not in cols:
+                raise SystemExit(f"답안 CSV에 열이 없음: {first_col}")
+            for aid, lab in labels.items():
+                lab["first"] = K.to_int(rows.get(aid, {}).get(first_col))
+        if code_col and code_col in cols:
+            for aid, lab in labels.items():
+                v = (rows.get(aid, {}).get(code_col) or "").strip()
+                lab["code"] = None if v in ("", "없음", "미완", "코드없음") else v
+                if v == "미완":
+                    lab["incomplete"] = True
+        elif code_col and not code_col_optional:
+            raise SystemExit(f"답안 CSV에 열이 없음: {code_col}")
     return kind, labels
 
 
@@ -361,7 +377,8 @@ def header(results, kind, labels, args):
            f"- 결과 파일: {', '.join(os.path.basename(p) for p in args.results)}",
            f"- 라벨: {os.path.basename(args.answers)} ({kind} {len(labels)}건"
            + (", H-09·H-13은 R2로 집계" if kind == "holdout" and not args.no_v3_relabel else "")
-           + (f", 첫 오류 라벨 열 {args.first_col or '전문가_첫오류'}" if kind == "expert" else "") + ")",
+           + (f", 첫 오류 라벨 열 {args.first_col or '전문가_첫오류'}" if kind == "expert" else "")
+           + (f", 주 코드 라벨 열 {args.code_col}" if args.code_col else "") + ")",
            f"- 행 수: {len(results)}", "",
            "| 모델 | 프롬프트 | grader | 코드북 | 행 |", "| --- | --- | --- | --- | --- |"]
     out += [f"| {m[0]} | {m[1]} | {m[2] or '(1.3 이전)'} | {m[3]} | {c} |" for m, c in meta.most_common()]
@@ -376,6 +393,7 @@ def main(argv=None):
     ap.add_argument("--results", nargs="+", required=True)
     ap.add_argument("--answers", required=True, help="키트 형식 라벨 CSV (expert_33.csv 또는 holdout45.csv)")
     ap.add_argument("--first-col", default="", help="첫 오류 라벨을 다른 열에서 읽기 (예: 라벨 통일본 열)")
+    ap.add_argument("--code-col", default="", help="주 코드 라벨을 다른 열에서 읽기 (예: 전문가_코드_통일, '미완' = 코드 없음)")
     ap.add_argument("--focus-ids", default=None,
                     help="지정 답안 확인에서 볼 답안 (쉼표 구분, 빈 문자열이면 생략). "
                          f"기본: expert {DEFAULT_FOCUS['expert']} / holdout {DEFAULT_FOCUS['holdout']}")
@@ -388,7 +406,7 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     args.results = resolve_results(args.results, args.latest)
-    kind, labels = load_labels(args.answers, not args.no_v3_relabel, args.first_col)
+    kind, labels = load_labels(args.answers, not args.no_v3_relabel, args.first_col, args.code_col)
     if kind == "holdout" and args.no_v3_relabel:
         for aid in K.V3_RELABEL:
             labels.pop(aid, None)

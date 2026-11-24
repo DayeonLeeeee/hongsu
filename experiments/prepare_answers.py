@@ -6,7 +6,8 @@
 
 만드는 파일 (answers/ 아래, 이미 있으면 덮어쓰지 않는다 — 사람이 고친 라벨 보호. 새로 만들려면 --force):
   expert_33.csv      키트 answers/expert_33.csv 복사. 키트가 없으면 엑셀 04 시트에서 같은 열 이름으로 만든다.
-                     라벨 통일(1-2)용 '전문가_첫오류_통일' 열을 덧붙인다 (처음엔 전문가_첫오류 복사. 사람이 고친다).
+                     라벨 통일용 '전문가_첫오류_통일'(1-2), '전문가_코드_통일'(미완 처리, '미완' = 코드 없음) 열을 덧붙인다
+                     (처음엔 원래 라벨 복사. 사람이 통일 대상만 고친다).
   holdout45.csv      키트 answers/holdout45.csv 복사 (--kit을 줬을 때만). 저장소에는 올라가지 않는다(.gitignore).
   converted_5.csv    1-4용 틀. 설명문형 5건의 원래 답안을 '원래_답안'에 두고 '학생_답안'은 비워 둔다.
 
@@ -23,6 +24,7 @@ XLSX_TO_KIT = {"줄별_판정": "전문가_줄별판정", "첫_독립_오류": "
                "justification_level": "전문가_J"}
 CONVERTED_IDS = "A-05-D,A-06-A,A-06-C,A-08-A,A-09-B"
 UNIFIED_COL = "전문가_첫오류_통일"
+UNIFIED_CODE_COL = "전문가_코드_통일"   # 주 코드 통일본 ('미완' = 코드 없음 + 미완, 예: A-06-A)
 
 
 def _write(path, cols, rows):
@@ -44,6 +46,23 @@ def expert_from_xlsx(xlsx):
             d = {h: ("" if v is None else str(v)) for h, v in zip(head, r)}
             out.append({c: d.get(c, "") for c in KIT_COLS})
     return out
+
+
+def add_unified_cols(path):
+    """라벨 통일 열이 없으면 원래 라벨을 복사해 덧붙인다 (사람이 통일 대상만 고친다). 고친 열이 있으면 건드리지 않는다."""
+    rows = read_csv(path)
+    if not rows:
+        return []
+    added = []
+    for col, src in ((UNIFIED_COL, "전문가_첫오류"), (UNIFIED_CODE_COL, "전문가_코드")):
+        if col not in rows[0]:
+            for r in rows:
+                r[col] = r.get(src, "")
+            added.append(col)
+    if added:
+        _write(path, list(rows[0].keys()), rows)
+        print(f"  {', '.join(repr(c) for c in added)} 열 추가 (원래 라벨 복사본 — 통일 대상만 고칠 것) : {path}")
+    return added
 
 
 def read_csv(path):
@@ -76,12 +95,7 @@ def main(argv=None):
         else:
             _write(expert_path, KIT_COLS, expert_from_xlsx(args.xlsx))
             print(f"엑셀 04 시트에서 생성: {expert_path}")
-        rows = read_csv(expert_path)
-        if rows and UNIFIED_COL not in rows[0]:
-            for r in rows:
-                r[UNIFIED_COL] = r.get("전문가_첫오류", "")
-            _write(expert_path, list(rows[0].keys()), rows)
-            print(f"  '{UNIFIED_COL}' 열 추가 (전문가_첫오류 복사본 — 라벨 통일 대상만 고칠 것)")
+        add_unified_cols(expert_path)
 
     if args.kit:
         src = os.path.join(args.kit, "answers", "holdout45.csv")
@@ -99,11 +113,12 @@ def main(argv=None):
             e = experts.get(aid, {"answer_id": aid})
             row = {c: e.get(c, "") for c in KIT_COLS}
             row["원래_답안"] = e.get("학생_답안", "")
+            row[UNIFIED_CODE_COL] = e.get(UNIFIED_CODE_COL, e.get("전문가_코드", ""))
             row["학생_답안"] = ""
             row["비고"] = ((e.get("비고") or "") + " | 학생_답안 칸에 풀이 형태로 다시 써 넣을 것 (① … ② …). "
                          "라벨은 변환 후 다시 확인").strip(" |")
             rows.append(row)
-        cols = KIT_COLS[:3] + ["원래_답안"] + KIT_COLS[3:]
+        cols = KIT_COLS[:3] + ["원래_답안"] + KIT_COLS[3:] + [UNIFIED_CODE_COL]
         _write(conv_path, cols, rows)
         print(f"1-4 변환 틀 {len(rows)}건: {conv_path}")
 

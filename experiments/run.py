@@ -125,6 +125,21 @@ def _write_csv(path, rows, fields):
         w.writerows(rows)
 
 
+def _add_code_col(path):
+    """converted_5에는 주 코드 통일 열만 (expert_33의 통일 열 값을 따른다)."""
+    import prepare_answers
+    rows = read_csv(path)
+    if not rows or prepare_answers.UNIFIED_CODE_COL in rows[0]:
+        return
+    exp = {r["answer_id"]: r for r in read_csv(os.path.join(ANSWERS, "expert_33.csv"))} \
+        if os.path.exists(os.path.join(ANSWERS, "expert_33.csv")) else {}
+    for r in rows:
+        e = exp.get(r["answer_id"], {})
+        r[prepare_answers.UNIFIED_CODE_COL] = e.get(prepare_answers.UNIFIED_CODE_COL, r.get("전문가_코드", ""))
+    _write_csv(path, rows, list(rows[0].keys()))
+    say(f"  '{prepare_answers.UNIFIED_CODE_COL}' 열 추가: {os.path.relpath(path, ROOT)}")
+
+
 def check_answer_csvs():
     """answers/의 CSV를 엑셀로 열어 저장했을 때 생기는 문제를 실험 전에 잡는다.
     - 한국어 Windows 엑셀의 일반 'CSV(쉼표로 분리)' 저장은 cp949라 f⁻¹의 '⁻' 같은 글자가 '?'로 바뀐다.
@@ -133,6 +148,14 @@ def check_answer_csvs():
       사람이 고치는 열은 expert_33의 '전문가_첫오류_통일' 하나뿐이므로 그 열만 그대로 둔다.
     - 엑셀은 '(1)'을 회계 음수 -1로 바꾼다 → 첫 오류 라벨이 조용히 '없음'이 되므로 멈춘다.
     - 그 밖의 파일(converted_5 등)은 사람이 쓴 내용이라 되돌릴 원본이 없다 → '?'가 생긴 칸을 알려 준다."""
+    import prepare_answers   # 예전에 만든 expert_33·converted_5에 라벨 통일 열(코드)이 없으면 덧붙인다
+    for name in ("expert_33.csv", "converted_5.csv"):
+        p = os.path.join(ANSWERS, name)
+        if os.path.exists(p):
+            try:
+                prepare_answers.add_unified_cols(p) if name == "expert_33.csv" else _add_code_col(p)
+            except (UnicodeDecodeError, KeyError):
+                pass   # 인코딩 문제는 아래에서 처리
     kit = _kit_soft()
     paths = glob.glob(os.path.join(ANSWERS, "*.csv")) + glob.glob(os.path.join(ANSWERS, "ocr", "*.csv"))
     for path in paths:
@@ -333,10 +356,11 @@ def cmd_1_2(a):
         say(f"통일 라벨로 고친 답안: {changed}")
     s = stamp()
     report(["--results", kit_result(kit, KIT_EXPERT_1111), "--answers", exp, "--first-col", "전문가_첫오류_통일",
-            "--only", "1-2,focus"], f"1-2_unified_1111_{s}")
+            "--code-col", "전문가_코드_통일", "--only", "1-2,1-5,focus"], f"1-2_unified_1111_{s}")
     newest = latest_result("expert_33")   # 1-1b를 돌렸으면 1.3 결과로도
     if newest:
-        report(["--results", newest, "--answers", exp, "--first-col", "전문가_첫오류_통일", "--only", "1-2,focus"],
+        report(["--results", newest, "--answers", exp, "--first-col", "전문가_첫오류_통일",
+                "--code-col", "전문가_코드_통일", "--only", "1-2,1-5,focus"],
                f"1-2_unified_1.3_{s}")
 
 
@@ -381,7 +405,8 @@ def cmd_1_4(a):
     before = latest_result("expert_33") if a.before_13 else kit_result(kit, KIT_EXPERT_1111)
     if a.before_13 and not before:
         stop("--before-13: results/에 1.3 expert 결과가 없음 (먼저 1-1b)")
-    compare(["--before", before, "--before-answers", exp, "--after", new, "--after-answers", conv],
+    compare(["--before", before, "--before-answers", exp, "--after", new, "--after-answers", conv,
+             "--code-col", "전문가_코드_통일"],
             f"1-4_converted_{stamp()}")
     if not a.before_13:
         say("\n(변환 전 = 11/11 결과(1.2), 변환 후 = 1.3 코드. 1-1b에서 판정 차이가 있었으면 --before-13 으로 다시 비교)")

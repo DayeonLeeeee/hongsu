@@ -83,6 +83,7 @@ def test_grade_returns_outcome_and_request_id(env):
     j = r.get_json()
     assert r.status_code == 200 and j["success"]
     assert j["outcome"] == "graded" and j["main_error_code"] == "R8"
+    assert j["completion_status"] == "complete" and j["is_correct"] is False
     assert j["request_id"] == "t-1" and r.headers["X-Request-ID"] == "t-1"
     assert j["model"] == j["response_models"][0]
 
@@ -209,6 +210,7 @@ def test_grade_incomplete_answer(env):
     env.claude.result = res
     j = env.client.post("/grade", json={"problem_id": "INV-R-01", "solution_text": ANSWER}).get_json()
     assert j["outcome"] == "incomplete" and j["missing_criteria"] == [5]
+    assert j["completion_status"] == "incomplete" and j["is_correct"] is None   # 미완은 정답·오답으로 나누지 않음
 
 
 def test_grade_api_failure_still_answers_with_error(env, monkeypatch):

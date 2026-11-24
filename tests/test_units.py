@@ -248,3 +248,13 @@ def test_usage_summary_and_report(tmp_path):
     p = tmp_path / "r.jsonl"
     p.write_text("\n".join(json.dumps(r) for r in recs), encoding="utf-8")
     assert "| r.jsonl | 2 | 3 | 2,100 | 210 | $0.06 |" in usage_report.main([str(p)])
+
+
+def test_validate_rejects_r3_on_incomplete_answer():
+    """중간에 멈춘(미완) 답안에는 R3를 붙이지 않는다 (grader 1.4)."""
+    p = good()
+    p.update(response_complete=False, main_error_code="R3")
+    issues = g.validate(p, ANSWER, ["R3", "R8"], True)
+    assert any("미완 답안" in i and "R3" in i for i in issues)
+    p["response_complete"] = True
+    assert not any("미완 답안" in i for i in g.validate(p, ANSWER, ["R3", "R8"], True))
