@@ -51,7 +51,8 @@ CREATE TABLE IF NOT EXISTS rv2_gradings (
 
     -- 학생이 실제로 본 것
     reveal_answer       boolean,       -- 정답 공개 여부 (공개 기준이 바뀌어도 당시 화면 복원용)
-    feedback            jsonb          -- 학생에게 보여 준 피드백
+    feedback            jsonb,         -- 학생에게 보여 준 피드백
+    git_commit          text           -- 채점에 쓴 코드의 git 커밋 ('+dirty' = 커밋 안 된 수정 포함)
 );
 
 CREATE INDEX IF NOT EXISTS rv2_gradings_problem_idx ON rv2_gradings (problem_id);

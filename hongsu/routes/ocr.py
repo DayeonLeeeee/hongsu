@@ -2,12 +2,13 @@
 """풀이 OCR(/ocr)과 자연어 수정(/refine). 학생이 OCR 결과를 확인·수정하는 단계."""
 import json
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify
 from flask.typing import ResponseReturnValue
 
 from hongsu import clients
 from hongsu import ocr as ocr_service
-from hongsu.config import MODEL_HAIKU
+from hongsu.config import MAX_ANSWER_CHARS, MODEL_HAIKU
+from hongsu.guard import BadInput, get_str, json_body, rate_limited
 from hongsu.logging_setup import log
 from hongsu.utils import make_image_block, normalize_plain, now_iso, parse_tool_use
 from prompts import refine as p_refine
@@ -40,15 +41,18 @@ TOOL_REFINE_TEXT = {
 
 
 @bp.route("/ocr", methods=["POST"])
+@rate_limited
 def ocr_endpoint() -> ResponseReturnValue:
     """
     학생 풀이 OCR: Mathpix + Gemini Flash 병렬 실행 → 단계별 평문 텍스트 반환.
     문제는 관리자가 텍스트로 등록하므로 OCR 대상 아님.
     """
     try:
-        data = request.get_json()
-        image_b64 = data.get("image", "")
-        mime_type = data.get("mime_type", "image/jpeg")
+        data = json_body()
+        image_b64 = get_str(data, "image")
+        mime_type = get_str(data, "mime_type", "image/jpeg", max_len=50)
+        if not image_b64:
+            raise BadInput("image: base64 이미지가 필요함")
 
         log.info(f"[OCR 요청] 이미지={len(image_b64)//1024}KB")
 
@@ -73,23 +77,28 @@ def ocr_endpoint() -> ResponseReturnValue:
             "timestamp": now_iso(),
         })
 
+    except BadInput:
+        raise
     except Exception as e:
         log.exception("[OCR 에러]")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
 @bp.route("/refine", methods=["POST"])
+@rate_limited
 def refine_endpoint() -> ResponseReturnValue:
     """
     사용자 자연어 지시로 OCR 평문 수정.
     풀이 단계 지정 수정도 여기서 처리 ("2단계에서 3+4로").
     """
     try:
-        data = request.get_json()
-        image_b64 = data.get("image", "")
-        mime_type = data.get("mime_type", "image/jpeg")
-        current_text = data.get("current_text", "")
-        user_instruction = data.get("instruction", "")
+        data = json_body()
+        image_b64 = get_str(data, "image")
+        mime_type = get_str(data, "mime_type", "image/jpeg", max_len=50)
+        current_text = get_str(data, "current_text", max_len=MAX_ANSWER_CHARS)
+        user_instruction = get_str(data, "instruction", max_len=1000)
+        if not image_b64:
+            raise BadInput("image: base64 이미지가 필요함")
 
         log.info(f"[수정 요청] instruction={user_instruction[:60]}")
 
@@ -117,6 +126,8 @@ def refine_endpoint() -> ResponseReturnValue:
         log.info(f"[수정 완료] changes={result.get('changes')}, agreement={result.get('image_agreement')}")
         return jsonify(result)
 
+    except BadInput:
+        raise
     except Exception as e:
         log.exception("[수정 에러]")
         return jsonify({"success": False, "error": str(e)}), 500

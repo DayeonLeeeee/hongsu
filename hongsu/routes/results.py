@@ -1,10 +1,11 @@
 # coding: utf-8
 """학생 결과 저장·조회(인메모리)와 통계·CSV 내보내기.
-영구 저장은 /grade가 Supabase rv2_gradings에 이미 한다."""
+영구 저장은 /grade가 rv2_gradings(Postgres 또는 Supabase)에 이미 한다."""
 from flask import Blueprint, jsonify, request
 from flask.typing import ResponseReturnValue
 
 from hongsu import storage
+from hongsu.guard import json_body
 from hongsu.logging_setup import log
 from hongsu.utils import now_iso
 
@@ -14,7 +15,7 @@ bp = Blueprint("results", __name__)
 @bp.route("/results", methods=["POST"])
 def save_result() -> ResponseReturnValue:
     """채점 결과 저장 (R v2 필드). Supabase 저장은 /grade 단계에서 끝났으므로 여기서는 인메모리만."""
-    data = request.get_json() or {}
+    data = json_body()
     rid = f"R{len(storage.results_db) + 1:06d}"
     result = {
         "result_id": rid,

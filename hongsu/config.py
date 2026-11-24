@@ -29,3 +29,11 @@ MAX_ATTEMPTS_BEFORE_REVEAL = 3
 # 최악의 경우 한 요청 = 2회 호출(형식 재시도) × 3번 시도 × 120초 = 720초 → gunicorn --timeout(기본 900)보다 짧아야 한다.
 CLAUDE_MAX_RETRIES = int(os.environ.get("CLAUDE_MAX_RETRIES", "2"))
 CLAUDE_TIMEOUT_S = float(os.environ.get("CLAUDE_TIMEOUT_S", "120"))
+
+# 입력 상한 (hongsu/guard.py). 합성 답안은 500자 안팎, 학생 풀이도 수십 줄을 넘기 어렵다.
+MAX_ANSWER_CHARS = int(os.environ.get("MAX_ANSWER_CHARS", "5000"))
+MAX_STEPS = int(os.environ.get("MAX_STEPS", "60"))
+MAX_REQUEST_MB = float(os.environ.get("MAX_REQUEST_MB", "20"))      # 이미지(base64) 포함 요청 본문
+# 요청 횟수 제한 (1분당, 엔드포인트별). 0이면 끈다.
+RATE_LIMIT_PER_MIN = int(os.environ.get("RATE_LIMIT_PER_MIN", "30"))        # 학생(student_id)별
+RATE_LIMIT_IP_PER_MIN = int(os.environ.get("RATE_LIMIT_IP_PER_MIN", "600"))  # IP별 (교실 = 공유기 IP 하나)

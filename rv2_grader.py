@@ -33,6 +33,7 @@ import datetime
 import json
 import os
 import re
+import subprocess
 from typing import Any, Dict, Optional, Tuple
 
 import rv2_codebook
@@ -80,6 +81,34 @@ USAGE_KEYS = ("input_tokens", "output_tokens", "cache_creation_input_tokens", "c
 
 def _now() -> str:
     return datetime.datetime.now().isoformat(timespec="seconds")
+
+
+_COMMIT: Optional[str] = None
+_COMMIT_DONE = False
+
+
+def code_commit() -> Optional[str]:
+    """채점에 쓴 코드의 git 커밋 (12자리). 재현성 기록용.
+    배포(Railway)는 RAILWAY_GIT_COMMIT_SHA, 그 밖에는 GIT_COMMIT 환경변수, 없으면 로컬 git.
+    커밋 안 된 수정이 있으면 '+dirty'를 붙인다 (그 결과는 커밋만으로 재현되지 않는다). 알 수 없으면 None."""
+    global _COMMIT, _COMMIT_DONE
+    if _COMMIT_DONE:
+        return _COMMIT
+    sha = os.environ.get("RAILWAY_GIT_COMMIT_SHA") or os.environ.get("GIT_COMMIT")
+    if sha:
+        _COMMIT = sha.strip()[:12]
+    else:
+        here = os.path.dirname(os.path.abspath(__file__))
+        try:
+            run = lambda *a: subprocess.run(["git", *a], cwd=here, capture_output=True, text=True,  # noqa: E731
+                                            timeout=5, check=True).stdout.strip()
+            _COMMIT = run("rev-parse", "--short=12", "HEAD")
+            if run("status", "--porcelain", "--untracked-files=no"):
+                _COMMIT += "+dirty"
+        except Exception:
+            _COMMIT = None
+    _COMMIT_DONE = True
+    return _COMMIT
 
 
 def norm(s: str) -> str:
@@ -391,7 +420,7 @@ def diagnose(client: Any, problem_id: str, answer_text: str, mode: str = "with_c
 
     rec = {
         "problem_id": problem_id, "mode": mode, "model": model,
-        "prompt_version": built["version"], "grader_version": GRADER_VERSION,
+        "prompt_version": built["version"], "grader_version": GRADER_VERSION, "git_commit": code_commit(),
         "codebook_version": mats.get("codebook_version"),
         "xlsx_sha8": mats.get("xlsx_sha8"), "allowed_codes": built["allowed_codes"],
         "answer_text": answer_text, "max_tokens": max_tokens, "temperature": temperature,

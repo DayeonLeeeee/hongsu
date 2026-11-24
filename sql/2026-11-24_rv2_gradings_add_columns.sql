@@ -12,3 +12,4 @@ ALTER TABLE rv2_gradings ADD COLUMN IF NOT EXISTS extraction      jsonb;  -- 호
 ALTER TABLE rv2_gradings ADD COLUMN IF NOT EXISTS first_issues    jsonb;  -- 첫 호출의 정제·검증 사유
 ALTER TABLE rv2_gradings ADD COLUMN IF NOT EXISTS reveal_answer   boolean; -- 학생에게 정답을 공개했는지
 ALTER TABLE rv2_gradings ADD COLUMN IF NOT EXISTS feedback        jsonb;  -- 학생에게 보여 준 피드백
+ALTER TABLE rv2_gradings ADD COLUMN IF NOT EXISTS git_commit      text;   -- 채점에 쓴 코드의 git 커밋

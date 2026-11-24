@@ -21,7 +21,7 @@ def health() -> ResponseReturnValue:
     ?deep=1: 결과 DB(Postgres 또는 Supabase) 조회와 Claude API(모델 조회, 토큰 비용 없음)까지 확인. 하나라도 실패하면 503."""
     m = rv2_codebook.get()
     body = {"status": "ok", "time": now_iso(), "version": p_rv2.PORT_VERSION,
-            "grader_version": rv2_grader.GRADER_VERSION,
+            "grader_version": rv2_grader.GRADER_VERSION, "git_commit": rv2_grader.code_commit(),
             "rv2_model": rv2_grader.RV2_MODEL, "tool_choice": rv2_grader.RV2_TOOL_CHOICE,
             "temperature": rv2_grader.RV2_TEMPERATURE,
             "xlsx_sha8": m.get("xlsx_sha8"), "codebook_version": m.get("codebook_version"),

@@ -5,6 +5,7 @@ from flask.typing import ResponseReturnValue
 
 import rv2_codebook
 from hongsu import storage
+from hongsu.guard import BadInput, json_body
 from hongsu.logging_setup import log
 from hongsu.utils import now_iso
 
@@ -24,7 +25,7 @@ def list_problems() -> ResponseReturnValue:
 @bp.route("/admin/problems", methods=["POST"])
 def add_problem() -> ResponseReturnValue:
     """문제 추가. 외부에서 JSON으로 문제 + 채점 가이드 입력."""
-    data = request.get_json()
+    data = json_body()
     pid = data.get("id") or storage.gen_id()
 
     problem = {
@@ -73,7 +74,7 @@ def update_problem(pid: str) -> ResponseReturnValue:
     """문제 수정 (부분 업데이트)"""
     if pid not in storage.problems_db:
         return jsonify({"success": False, "error": "문제를 찾을 수 없습니다"}), 404
-    data = request.get_json()
+    data = json_body()
     for key, val in data.items():
         if key != "id":   # id는 변경 불가
             storage.problems_db[pid][key] = val
@@ -94,8 +95,10 @@ def delete_problem(pid: str) -> ResponseReturnValue:
 @bp.route("/admin/problems/bulk", methods=["POST"])
 def bulk_add_problems() -> ResponseReturnValue:
     """문제 일괄 등록 (배열로 보내기)"""
-    data = request.get_json()
+    data = json_body()
     problems = data.get("problems", [])
+    if not isinstance(problems, list) or not all(isinstance(p, dict) for p in problems):
+        raise BadInput("problems: 문항 객체 배열이어야 함")
     added = []
     for p in problems:
         pid = p.get("id") or storage.gen_id()
@@ -123,7 +126,7 @@ def rv2_reload() -> ResponseReturnValue:
 def master_solution_endpoint() -> ResponseReturnValue:
     """DB에 저장된 모범답안(model_answer)을 반환."""
     try:
-        data = request.get_json()
+        data = json_body()
         problem_id = data.get("problem_id", "")
         problem_text = data.get("problem_text", "")
 
@@ -153,6 +156,8 @@ def master_solution_endpoint() -> ResponseReturnValue:
             "timestamp": now_iso(),
         })
 
+    except BadInput:
+        raise
     except Exception as e:
         log.exception("[해설 에러]")
         return jsonify({"success": False, "error": str(e)}), 500

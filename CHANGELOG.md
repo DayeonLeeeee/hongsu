@@ -1,0 +1,39 @@
+# 변경 이력
+
+채점 결과에 영향을 주는 파일별로 정리한다. 결과 파일·DB의 `prompt_version`, `grader_version`, `git_commit`으로 어느 버전으로 채점했는지 찾는다.
+
+- 프롬프트를 바꾸면 `prompts/rv2.py`의 `PORT_VERSION`을 올린다. 안 올리면 `tests/test_units.py`의 프롬프트 지문 테스트가 실패한다.
+- 정제·검증·재시도 로직을 바꾸면 `rv2_grader.py`의 `GRADER_VERSION`을 올린다.
+- 둘 중 하나라도 바꾸면 `experiments/regression.py`(실험 3-3)로 고정 답안 20건을 다시 돌려 기준과 비교한다.
+
+## prompts/rv2.py — 채점 프롬프트 (`PORT_VERSION`)
+
+| 버전 | 날짜 | 변경 | 판정 기준 변경 |
+| --- | --- | --- | --- |
+| hongsu-rv2-1.3 | 2026-11-24 | 스키마 뒤에 출력 형식 규칙(`FORMAT_RULES`) 추가: 줄은 객체로, 불리언·null은 문자열 금지, judgment 소문자, 번호 필드는 정수, 도구를 못 쓰면 ```json 블록 하나 | 없음 |
+| hongsu-rv2-1.2 | 2026-10~11 | 코드북 R-v3(2026-10-30 오세준 교수님 승인본) 대응: `response_complete`·`missing_criteria` 출력 추가(규칙 12), '안 쓴 기준' 처리 단계 추가, C-3 적용 범위를 결론이 옳은 답안으로 한정(규칙 11), 코드북 버전을 엑셀에서 읽음 | 있음 (R-v3) |
+| (이식 초판) | 2026-10 | 키트 `prompt_builder.py`(kit-1.2-20261022) 이식. 자료 출처만 엑셀 직접 로드로, 출력은 tool_use로 | 키트와 동일 |
+
+**1.3에서 일부러 뺀 규칙 (주석으로 보존).** 아래 두 문장은 줄 나누는 방식, 곧 줄별 판정 내용을 바꿀 수 있어 넣지 않았다. `prompts/rv2.py`의 `FORMAT_RULES` 위 주석에 그대로 남아 있고, 되돌리려면 `"- lines의 각 원소는 …"` 다음 줄에 넣고 `PORT_VERSION`을 올린다.
+
+- `학생 답안의 줄 하나 = lines 원소 하나.`
+- `여러 줄을 한 원소에 합치지 않는다.` (원래 "lines의 각 원소는 …" 규칙 끝에 붙어 있던 문장)
+
+## rv2_grader.py — 응답 정제·검증·재시도 (`GRADER_VERSION`)
+
+| 버전 | 날짜 | 변경 |
+| --- | --- | --- |
+| rv2-grader-1.3 | 2026-11-24 | 응답 정제를 `sanitize()` 하나로 통합(고칠 수 있는 형식은 고치고, 못 고치는 것은 사유를 남겨 1회 재시도·검수). tool_use 블록이 없으면 텍스트의 JSON을 읽음(`extract_result`). 결과 블록이 없어도 1회 재시도. 모델별 호출 기본값(Opus 5.5: 도구 auto, temperature 없음). 기본 모델 Opus 5.5. `outcome`(graded/review/incomplete/not_attempted/unreadable/error)과 `review_sources` 분류. 기록 추가: `extraction`, `first_issues`, `response_models`, `tool_choice`, `git_commit` |
+| (1.2 이전) | 2026-10 | 키트 `run_eval.validate()` 이식: 인용문 원문 대조, 허용 밖 코드 거부, 실패 사유를 붙여 1회 재시도, `missing_criteria` 번호 검사 |
+
+1.3 정제 규칙 중 판정에 닿을 수 있는 것은 모두 보수적으로 정했다: 인용(quote)·근거(reason)의 "없음", "-"는 학생이 실제로 쓴 글자일 수 있어 null로 바꾸지 않는다. judgment의 별칭(정답/오답 같은 말)은 해석하지 않고 재시도로 보낸다. `depends_on` 목록은 자르지 않는다. 소수 줄 번호는 버리지 않고 해석 불가로 둔다.
+
+## 서버 (hongsu/) — 채점 결과에는 영향 없음
+
+| 날짜 | 변경 |
+| --- | --- |
+| 2026-11-25 | 입력 검증(잘못된 요청은 400과 이유, 답안·단계 수·본문 크기 상한), 요청 횟수 제한(학생별·IP별 1분당, 비용 드는 엔드포인트만), 결과에 `git_commit` 기록, requirements 버전 고정 |
+| 2026-11-25 | OCR 평문 정리 버그 수정: `\frac{x-2}{3}`이 `(x-2/3)`, `\sqrt{x+1}`이 `√x+1`로 바뀌던 것을 `((x-2)/3)`, `√(x+1)`로 (`/ocr`, `/refine` 텍스트만) |
+| 2026-11-25 | 타입 힌트, 문항·기준표 조회를 `prompts/rv2.py` 하나로 통일 |
+| 2026-11-24 | 채점 결과 저장을 Railway PostgreSQL로(`DATABASE_URL`, 없으면 Supabase). 학생이 본 것(`reveal_answer`, `feedback`) 저장 |
+| 2026-11-24 | `hongsu_server.py` 단일 파일을 `hongsu/` 패키지로 분리(동작 동일). 로깅과 요청별 `request_id`. `/health?deep=1`. `/measure_consistency` 중첩 요청 오류 수정 |

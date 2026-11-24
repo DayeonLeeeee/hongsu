@@ -1,12 +1,13 @@
 # coding: utf-8
 """R v2 진단(/grade)과 반복 일관성 측정(/measure_consistency)."""
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, current_app, jsonify
 from flask.typing import ResponseReturnValue
 
 import rv2_codebook
 import rv2_grader
 from hongsu import clients, storage
-from hongsu.config import MAX_ATTEMPTS_BEFORE_REVEAL
+from hongsu.config import MAX_ANSWER_CHARS, MAX_ATTEMPTS_BEFORE_REVEAL, MAX_STEPS
+from hongsu.guard import INTERNAL_FLAG, BadInput, get_int, get_str, json_body, rate_limited
 from hongsu.logging_setup import current_request_id, log
 from hongsu.utils import now_iso
 from prompts import rv2 as p_rv2
@@ -15,6 +16,7 @@ bp = Blueprint("grade", __name__)
 
 
 @bp.route("/grade", methods=["POST"])
+@rate_limited
 def grade_rv2_endpoint() -> ResponseReturnValue:
     """
     R v2 진단 — 이용오 선생님 키트(run_eval/prompt_builder) 로직의 서버 이식.
@@ -29,12 +31,14 @@ def grade_rv2_endpoint() -> ResponseReturnValue:
     이미지만 보내면 400 — R v2는 학생/교사가 확인한 OCR 텍스트(input_status=confirmed)로 판정한다.
     """
     try:
-        data = request.get_json() or {}
-        problem_id = data.get("problem_id", "")
-        mode = data.get("mode", "with_codebook")
-        input_status = data.get("input_status", "confirmed")
-        attempt_count = int(data.get("attempt_count", 1))
-        student_id = data.get("student_id", "anonymous")
+        data = json_body()
+        problem_id = get_str(data, "problem_id", max_len=50)
+        mode = get_str(data, "mode", "with_codebook", max_len=30)
+        input_status = get_str(data, "input_status", "confirmed", max_len=30)
+        attempt_count = get_int(data, "attempt_count", 1, 1, 1000)
+        student_id = get_str(data, "student_id", "anonymous", max_len=100) or "anonymous"
+        if input_status not in ("confirmed", "not_attempted", "unreadable"):
+            raise BadInput(f"input_status 값 오류: {input_status}")
 
         if mode not in ("with_codebook", "grade_only"):
             return jsonify({"success": False, "error": f"mode 값 오류: {mode}"}), 400
@@ -42,9 +46,18 @@ def grade_rv2_endpoint() -> ResponseReturnValue:
             return jsonify({"success": False,
                             "error": f"R v2 문항이 아님: {problem_id} (엑셀 01_PROBLEMS에 없음)"}), 400
 
-        answer_text = data.get("solution_text", "") or ""
-        if data.get("solution_steps"):
-            answer_text = rv2_grader.steps_to_answer_text(data["solution_steps"])
+        answer_text = get_str(data, "solution_text", max_len=MAX_ANSWER_CHARS)
+        steps = data.get("solution_steps")
+        if steps:
+            if not isinstance(steps, list) or not all(isinstance(s, dict) for s in steps):
+                raise BadInput("solution_steps: [{index, text}, …] 형식이어야 함")
+            if len(steps) > MAX_STEPS:
+                raise BadInput(f"solution_steps: 너무 많음 ({len(steps)}개, 최대 {MAX_STEPS}개)")
+            for s in steps:
+                get_str(s, "text", max_len=MAX_ANSWER_CHARS)
+            answer_text = rv2_grader.steps_to_answer_text(steps)
+            if len(answer_text) > MAX_ANSWER_CHARS:
+                raise BadInput(f"답안이 너무 김 ({len(answer_text)}자, 최대 {MAX_ANSWER_CHARS}자)")
         if not answer_text.strip() and data.get("solution_image_b64"):
             return jsonify({"success": False,
                             "error": "R v2는 확인된 OCR 텍스트로 채점합니다. /ocr → (/refine) 후 solution_steps로 보내세요."}), 400
@@ -97,6 +110,7 @@ def grade_rv2_endpoint() -> ResponseReturnValue:
             # ── 재현성 필드 (README 규칙 5) ──
             "prompt_version": rec.get("prompt_version"),
             "grader_version": rec.get("grader_version", rv2_grader.GRADER_VERSION),
+            "git_commit": rec.get("git_commit", rv2_grader.code_commit()),
             "codebook_version": rec.get("codebook_version"),
             "xlsx_sha8": rec.get("xlsx_sha8"),
             "allowed_codes": rec.get("allowed_codes"),
@@ -126,12 +140,15 @@ def grade_rv2_endpoint() -> ResponseReturnValue:
         status = 200 if result["success"] else 502
         return jsonify(result), status
 
+    except BadInput:
+        raise
     except Exception as e:
         log.exception("[R v2 에러]")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
 @bp.route("/measure_consistency", methods=["POST"])
+@rate_limited
 def measure_consistency_endpoint() -> ResponseReturnValue:
     """
     같은 입력으로 채점을 여러 번 실행해서 재현 일관성을 측정.
@@ -144,8 +161,8 @@ def measure_consistency_endpoint() -> ResponseReturnValue:
       n_runs: 반복 횟수 (기본 3, 최대 5)
     """
     try:
-        data = request.get_json()
-        n_runs = min(int(data.get("n_runs", 3)), 5)
+        data = json_body()
+        n_runs = min(get_int(data, "n_runs", 3, 1, 1000), 5)   # 최대 5회 (비용)
 
         runs = []
         for i in range(n_runs):
@@ -153,7 +170,7 @@ def measure_consistency_endpoint() -> ResponseReturnValue:
             # 채점 호출 (내부적으로 grade_endpoint 로직 재사용)
             # 여기서는 간단히 요청을 다시 보냄
             with current_app.test_client() as c:
-                resp = c.post("/grade", json=data)
+                resp = c.post("/grade", json=data, environ_base={INTERNAL_FLAG: True})  # 횟수 제한 제외
                 runs.append(resp.get_json())
 
         # 통계 계산 (R v2: main_error_code·J 기준. 코드 없음(None)도 하나의 판정으로 셈)
@@ -175,6 +192,8 @@ def measure_consistency_endpoint() -> ResponseReturnValue:
             "timestamp": now_iso(),
         })
 
+    except BadInput:
+        raise
     except Exception as e:
         log.exception("[일관성 측정 에러]")
         return jsonify({"success": False, "error": str(e)}), 500

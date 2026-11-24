@@ -4,7 +4,13 @@ from flask import Flask, jsonify, request
 from flask.typing import ResponseReturnValue
 
 from hongsu import logging_setup, routes, storage
+from hongsu.config import MAX_REQUEST_MB
+from hongsu.guard import BadInput
 from hongsu.logging_setup import current_request_id, log
+
+
+def _bad_input(e: BadInput) -> ResponseReturnValue:
+    return jsonify({"success": False, "error": str(e), "request_id": current_request_id()}), 400
 
 
 def _unhandled(e: Exception) -> ResponseReturnValue:
@@ -18,7 +24,9 @@ def _unhandled(e: Exception) -> ResponseReturnValue:
 
 def create_app() -> Flask:
     app = Flask(__name__)
+    app.config["MAX_CONTENT_LENGTH"] = int(MAX_REQUEST_MB * 1024 * 1024)   # 넘으면 413
     logging_setup.init_app(app)
+    app.register_error_handler(BadInput, _bad_input)
     app.register_error_handler(Exception, _unhandled)
     routes.register(app)
     storage.load_initial_problems()

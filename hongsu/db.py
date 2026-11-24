@@ -22,7 +22,7 @@ RV2_COLUMNS = {
     "model": "text", "n_calls": "integer", "usage": "jsonb", "stop_reasons": "jsonb", "raw_responses": "jsonb",
     "request_id": "text", "outcome": "text", "review_sources": "jsonb", "grader_version": "text",
     "tool_choice": "text", "response_models": "jsonb", "extraction": "jsonb", "first_issues": "jsonb",
-    "reveal_answer": "boolean", "feedback": "jsonb",
+    "reveal_answer": "boolean", "feedback": "jsonb", "git_commit": "text",
 }
 
 _DDL = ["CREATE TABLE IF NOT EXISTS rv2_gradings ("

@@ -60,6 +60,8 @@ def env(monkeypatch):
     monkeypatch.setattr(clients, "get_claude", lambda: fake)
     monkeypatch.setattr(clients, "get_supabase", lambda: None)
     monkeypatch.setattr(clients, "get_gemini_model", lambda: FakeGemini())
+    from hongsu import guard
+    guard.reset()   # 요청 횟수 카운터는 테스트마다 새로
     return SimpleNamespace(client=hongsu_server.app.test_client(), app=hongsu_server.app, claude=fake)
 
 
@@ -252,3 +254,101 @@ def test_postgres_real_roundtrip(env, monkeypatch):
                            "FROM rv2_gradings").fetchone()
     assert row[0] == text and row[1][1]["code"] == "R8" and row[2] == "graded"
     assert row[3] is False and row[4] is True
+
+
+# ── 입력 검증·요청 횟수 제한·재현성 (Day 5) ───────────────────
+
+
+@pytest.mark.parametrize("path,body", [
+    ("/grade", None),
+    ("/grade", {"problem_id": "INV-R-01", "solution_text": ANSWER, "attempt_count": "많이"}),
+    ("/grade", {"problem_id": "INV-R-01", "solution_text": ANSWER, "attempt_count": 0}),
+    ("/grade", {"problem_id": "INV-R-01", "solution_text": "가" * 5001}),
+    ("/grade", {"problem_id": "INV-R-01", "solution_steps": "1) f(1)=3"}),
+    ("/grade", {"problem_id": "INV-R-01", "solution_steps": [{"text": "x"}] * 61}),
+    ("/grade", {"problem_id": "INV-R-01", "solution_text": ANSWER, "input_status": "blank"}),
+    ("/grade", {"problem_id": ["INV-R-01"], "solution_text": ANSWER}),
+    ("/ocr", {"mime_type": "image/png"}),
+    ("/refine", {"image": "QUJD", "instruction": "x" * 1001}),
+    ("/measure_consistency", {"problem_id": "INV-R-01", "solution_text": ANSWER, "n_runs": "x"}),
+    ("/admin/problems", None),
+    ("/admin/problems/bulk", {"problems": "A"}),
+    ("/results", None),
+    ("/master_solution", None),
+])
+def test_bad_input_is_400_not_500_and_costs_nothing(env, path, body):
+    r = env.client.post(path, json=body) if body is not None else env.client.post(path, data="x")
+    assert r.status_code == 400, (path, r.status_code, r.get_json())
+    assert r.get_json()["success"] is False and r.get_json()["error"]
+    assert env.claude.calls == []
+
+
+def test_numbers_as_strings_still_work(env):
+    j = env.client.post("/grade", json={"problem_id": "INV-R-01", "solution_text": ANSWER,
+                                        "attempt_count": "2", "student_id": 1234}).get_json()
+    assert j["success"] and j["attempt_count"] == 2 and j["student_id"] == "1234"
+
+
+def test_too_large_body_is_413(env, monkeypatch):
+    env.app.config["MAX_CONTENT_LENGTH"], old = 1000, env.app.config["MAX_CONTENT_LENGTH"]
+    try:
+        assert env.client.post("/ocr", json={"image": "A" * 2000}).status_code == 413
+    finally:
+        env.app.config["MAX_CONTENT_LENGTH"] = old
+
+
+def test_rate_limit_per_student_and_ip(env, monkeypatch):
+    from hongsu import guard
+    monkeypatch.setattr(guard, "RATE_LIMIT_PER_MIN", 2)
+    monkeypatch.setattr(guard, "RATE_LIMIT_IP_PER_MIN", 3)
+    body = {"problem_id": "INV-R-01", "solution_text": ANSWER, "student_id": "s1"}
+    assert [env.client.post("/grade", json=body).status_code for _ in range(3)] == [200, 200, 429]
+    r = env.client.post("/grade", json=body)
+    assert int(r.headers["Retry-After"]) > 0 and "학생별" in r.get_json()["error"]
+    other = dict(body, student_id="s2")    # 다른 학생: 학생 한도는 따로, 같은 교실 IP 한도는 공유
+    assert env.client.post("/grade", json=other).status_code == 200
+    assert env.client.post("/grade", json=other).status_code == 429   # IP 3회 초과
+    assert "IP별" in env.client.post("/grade", json=other).get_json()["error"]
+    # 다른 IP(X-Forwarded-For)의 학생은 영향 없음, 다른 엔드포인트도 따로 센다
+    assert env.client.post("/grade", json=dict(body, student_id="s3"),
+                           headers={"X-Forwarded-For": "10.0.0.9"}).status_code == 200
+    assert env.client.post("/refine", json={"image": "QUJD", "current_text": "a", "instruction": "b",
+                                            "student_id": "s1"}).status_code == 200
+    assert len([c for c in env.claude.calls if c["tools"][0]["name"] != "refine_ocr_text"]) == 4
+
+
+def test_rate_limit_skips_internal_consistency_calls(env, monkeypatch):
+    from hongsu import guard
+    monkeypatch.setattr(guard, "RATE_LIMIT_PER_MIN", 1)
+    monkeypatch.setattr(guard, "RATE_LIMIT_IP_PER_MIN", 1)
+    r = env.client.post("/measure_consistency", json={"problem_id": "INV-R-01", "solution_text": ANSWER,
+                                                      "n_runs": 3, "student_id": "s1"})
+    assert r.status_code == 200 and len(r.get_json()["runs"]) == 3 and all(x["success"] for x in r.get_json()["runs"])
+
+
+def test_rate_limit_off_with_zero(env, monkeypatch):
+    from hongsu import guard
+    monkeypatch.setattr(guard, "RATE_LIMIT_PER_MIN", 0)
+    monkeypatch.setattr(guard, "RATE_LIMIT_IP_PER_MIN", 0)
+    body = {"problem_id": "INV-R-01", "solution_text": ""}
+    assert all(env.client.post("/grade", json=body).status_code == 200 for _ in range(5))
+
+
+def test_git_commit_recorded_in_result_health_and_saved_row(env, monkeypatch):
+    import rv2_grader
+    monkeypatch.setattr(rv2_grader, "_COMMIT", "abc123def456")
+    monkeypatch.setattr(rv2_grader, "_COMMIT_DONE", True)
+    rows = _saved(monkeypatch)
+    j = env.client.post("/grade", json={"problem_id": "INV-R-01", "solution_text": ANSWER}).get_json()
+    assert j["git_commit"] == "abc123def456" and rows[0]["git_commit"] == "abc123def456"
+    blank = env.client.post("/grade", json={"problem_id": "INV-R-01", "solution_text": ""}).get_json()
+    assert blank["git_commit"] == "abc123def456"
+    assert env.client.get("/health").get_json()["git_commit"] == "abc123def456"
+
+
+def test_code_commit_prefers_deploy_env(monkeypatch):
+    import rv2_grader
+    monkeypatch.setattr(rv2_grader, "_COMMIT", None)       # 테스트 뒤 원래 값으로 돌아가게
+    monkeypatch.setattr(rv2_grader, "_COMMIT_DONE", False)
+    monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", "0123456789abcdef0123")
+    assert rv2_grader.code_commit() == "0123456789ab"
