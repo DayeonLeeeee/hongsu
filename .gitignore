@@ -13,3 +13,4 @@ answers/.kit_path
 .venv/
 experiments/regression/run_*.jsonl
 experiments/regression/report_*.md
+.coverage
