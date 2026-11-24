@@ -113,9 +113,23 @@ def test_expert_first_line_matches_kit_definition(expert):
 def test_expert_focus_and_vote(expert):
     ans, res_path, _ = expert
     t = run_report(["--results", res_path, "--answers", ans, "--focus-ids", "A1,ZZ", "--only", "1-3"])
-    # A1: 기권은 표에서 빠지고 R8 다수결 → 일치
-    assert "| A1 | R8 | 1 | 2 / 2 / 없음 | R8 / R8 / 없음(기권) | R8 | 일치 |" in t
+    # A1: 기권은 표에서 빠지고 R8 다수결 → 일치. 1회차 오류 줄은 학생 1줄 → 기준 2
+    assert "| A1 | R8 | 1 | R8 / R8 / 없음(기권) | R8 | 일치 | 1→기준2:R8 |" in t
     assert "| ZZ | (라벨 또는 결과 없음)" in t
+
+
+def test_holdout_focus_default_and_latest(holdout, tmp_path):
+    ans, res_path, rows = holdout
+    old = tmp_path / "stage3_holdout45_m_c_20261101_0900.jsonl"
+    new = tmp_path / "stage3_holdout45_m_c_20261124_1500.jsonl"
+    old.write_text("", encoding="utf-8")
+    new.write_text(open(res_path, encoding="utf-8").read(), encoding="utf-8")
+    t = run_report(["--results", str(tmp_path / "stage3_holdout45_*.jsonl"), "--latest", "--answers", ans,
+                    "--focus-ids", "H-01", "--only", "focus"])
+    assert "stage3_holdout45_m_c_20261124_1500.jsonl" in t and "20261101" not in t
+    assert "| H-01 | R6 | - | 없음(기권) / 없음(기권) / 없음(기권) | 없음(기권) | 불일치 | 없음 | 애매함 |" in t
+    import score_experiments
+    assert score_experiments.DEFAULT_FOCUS["holdout"] == "H-03,H-33,H-10,H-15"
 
 
 def test_holdout_scenarios_and_relabel(holdout):
@@ -228,3 +242,12 @@ def test_ocr_compare_end_to_end(tmp_path, monkeypatch):
     assert good.startswith(" 1/1 | 0.000 |") and good.rstrip().endswith("0/1 |")
     assert "| 1/1 | " in fixer and fixer.rstrip().endswith("1/1 |")
     assert "| nokey | 키 없음 |" in t
+
+
+def test_compare_runs_all_ids(expert, tmp_path):
+    ans, res_path, _ = expert
+    out = compare_runs.main(["--before", res_path, "--after", res_path, "--before-answers", ans,
+                             "--after-answers", ans, "--ids", "all", "--before-tag", "1.2", "--after-tag", "1.3",
+                             "--title", "1-1b 재채점 비교"])
+    assert out.startswith("# 1-1b 재채점 비교") and "다수결 판정이 달라진 답안: 0/3" in out
+    assert "| A1 | 1.3 |" in out and "오세준" not in out

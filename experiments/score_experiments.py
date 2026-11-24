@@ -4,6 +4,7 @@
 
 채점 정의는 키트 채점기(experiments/score_rv2.py, 원본 rv2_kit/score_rv2.py)를 그대로 쓴다.
 그래서 같은 결과 파일이면 score_rv2.py와 같은 숫자가 나오고, 거기에 실험별 표를 더한다.
+결과는 최신 결과 파일로만 본다: 여러 파일을 줄 때는 --latest (또는 * 패턴 + --latest).
 LLM을 부르지 않는다 (비용 0).
 
   python experiments/score_experiments.py \
@@ -20,6 +21,7 @@ LLM을 부르지 않는다 (비용 0).
 """
 import argparse
 import csv
+import glob
 import json
 import os
 import re
@@ -32,6 +34,10 @@ sys.path.insert(0, HERE)
 import score_rv2 as K  # noqa: E402  (키트 채점기 복사본)
 
 # 정제(형식) 단계에서 나오는 사유. 이 밖의 사유는 검증(내용: 인용·허용 코드·기준 번호 등).
+# 지정 답안 확인 기본값: expert = 1-3 모호 답안, holdout = 교수님께 묻기 전에 코드 개선 후 재확인할 답안
+#   H-03·H-33: 오류 두 개 — 모델은 앞 줄, 라벨은 뒤 줄 코드 / H-10: 기준표와 오답 유형 불일치 / H-15: R6 정의 범위
+DEFAULT_FOCUS = {"expert": "A-05-B,A-07-B", "holdout": "H-03,H-33,H-10,H-15"}
+
 SCHEMA_ISSUE_KEYS = ["결과 블록 없음", "응답이 객체", "lines 없음", "lines가 리스트", "줄이 객체가 아님",
                      "줄 번호(no)", "judgment 값", "math_result_correct 해석", "input_status 값",
                      "justification_level"]
@@ -40,6 +46,24 @@ SCHEMA_ISSUE_KEYS = ["결과 블록 없음", "응답이 객체", "lines 없음",
 # ─────────────────────────────────────
 # 입력
 # ─────────────────────────────────────
+
+def resolve_results(paths, latest=False):
+    """* 패턴을 펼치고(PowerShell은 패턴을 펼쳐 주지 않음), --latest면 가장 최신 파일 하나만 남긴다.
+    최신 = 파일 이름의 실행 시각(…_YYYYMMDD_HHMM) 기준, 같으면 수정 시각."""
+    files = []
+    for p in paths:
+        hits = sorted(glob.glob(p)) if any(ch in p for ch in "*?[") else [p]
+        if not hits:
+            raise SystemExit(f"결과 파일 없음: {p}")
+        files += hits
+    files = list(dict.fromkeys(files))
+    if latest and len(files) > 1:
+        def key(f):
+            m = re.findall(r"(\d{8})_(\d{4})", os.path.basename(f))
+            return (m[-1] if m else ("", ""), os.path.getmtime(f))
+        files = [max(files, key=key)]
+    return files
+
 
 def load_results(paths):
     rows = []
@@ -150,8 +174,8 @@ def exp_1_1(results):
     return out
 
 
-def exp_1_2(runs, labels, focus_ids):
-    """키트와 같은 첫 오류 줄 일치(1회차) + 회차별 일치 + 답안별 표. 1-3은 지정 답안만 따로."""
+def exp_1_2(runs, labels):
+    """키트와 같은 첫 오류 줄 일치(1회차) + 회차별 일치 + 답안별 표."""
     first_n = first_d = 0
     rep_hit = defaultdict(lambda: [0, 0])
     table = []
@@ -179,22 +203,45 @@ def exp_1_2(runs, labels, focus_ids):
                    f"{' / '.join('없음' if f is None else str(f) for f in firsts)} | {' / '.join(codes)} | {hit}/{len(firsts)} |")
     out.append("")
 
-    if focus_ids:
-        out += ["## 1-3 지정 답안 재확인", "",
-                "| answer_id | 라벨 코드 | 라벨 첫 줄 | AI 첫 줄 (회차별) | AI 코드 (회차별) | 다수결 | 코드 일치 |",
-                "| --- | --- | --- | --- | --- | --- | --- |"]
-        for aid in focus_ids:
-            lab = labels.get(aid)
-            recs = [r for _, r in runs.get(aid, [])]
-            if not lab or not recs:
-                out.append(f"| {aid} | (라벨 또는 결과 없음) | | | | | |")
-                continue
-            firsts = [K.ai_first_error(r["result"]) if r.get("result") else "ERR" for r in recs]
-            maj = answer_vote(recs)
-            out.append(f"| {aid} | {lab['code'] or '없음'} | {lab['first'] if lab['first'] is not None else '없음'} | "
-                       f"{' / '.join('없음' if f is None else str(f) for f in firsts)} | "
-                       f"{' / '.join(run_label(r) for r in recs)} | {maj} | {'일치' if K.is_match(maj, lab['code']) else '불일치'} |")
-        out.append("")
+    return out
+
+
+def _wrong_lines(rec):
+    """1회차 wrong 줄들: '학생줄→기준:코드' 목록."""
+    lines = [ln for ln in ((rec.get("result") or {}).get("lines") or []) if isinstance(ln, dict)]
+    return ", ".join(f"{ln.get('no')}→기준{ln.get('matched_criterion')}:{ln.get('code') or '코드없음'}"
+                     for ln in lines if ln.get("judgment") == "wrong") or "없음"
+
+
+def _reason(rec):
+    """모델 사유: 검수 사유가 있으면 그것, 없으면 첫 wrong 줄의 reason."""
+    res = rec.get("result") or {}
+    txt = res.get("review_reason") or ""
+    if not txt:
+        for ln in res.get("lines") or []:
+            if isinstance(ln, dict) and ln.get("judgment") == "wrong" and ln.get("reason"):
+                txt = ln["reason"]
+                break
+    return txt.replace("|", "/").replace("\n", " ")[:150]
+
+
+def exp_focus(runs, labels, focus_ids, kind):
+    """지정 답안 확인 — 1-3(expert 모호 답안)과 '코드 개선 후에도 같은 현상인지' 확인할 holdout 답안."""
+    out = ["## 지정 답안 확인 (1-3, 코드 개선 후 재확인)", "",
+           "1회차 기준 오류 줄 목록과 모델 사유를 함께 본다. 회차별 코드는 반복 3회.", "",
+           "| answer_id | 라벨 코드 | 라벨 첫 줄 | AI 코드 (회차별) | 다수결 | 코드 일치 | AI 오류 줄 (1회차: 학생줄→기준:코드) | 모델 사유 (1회차) |",
+           "| --- | --- | --- | --- | --- | --- | --- | --- |"]
+    for aid in focus_ids:
+        lab = labels.get(aid)
+        recs = [r for _, r in runs.get(aid, [])]
+        if not lab or not recs:
+            out.append(f"| {aid} | (라벨 또는 결과 없음) | | | | | | |")
+            continue
+        maj = answer_vote(recs)
+        first = lab["first"] if lab.get("first") is not None else ("없음" if kind == "expert" else "-")
+        out.append(f"| {aid} | {lab['code'] or '없음'} | {first} | {' / '.join(run_label(r) for r in recs)} | {maj} | "
+                   f"{'일치' if K.is_match(maj, lab['code']) else '불일치'} | {_wrong_lines(recs[0])} | {_reason(recs[0])} |")
+    out.append("")
     return out
 
 
@@ -329,13 +376,18 @@ def main(argv=None):
     ap.add_argument("--results", nargs="+", required=True)
     ap.add_argument("--answers", required=True, help="키트 형식 라벨 CSV (expert_33.csv 또는 holdout45.csv)")
     ap.add_argument("--first-col", default="", help="첫 오류 라벨을 다른 열에서 읽기 (예: 라벨 통일본 열)")
-    ap.add_argument("--focus-ids", default="A-05-B,A-07-B", help="1-3에서 따로 볼 답안 (쉼표 구분, 비우면 생략)")
+    ap.add_argument("--focus-ids", default=None,
+                    help="지정 답안 확인에서 볼 답안 (쉼표 구분, 빈 문자열이면 생략). "
+                         f"기본: expert {DEFAULT_FOCUS['expert']} / holdout {DEFAULT_FOCUS['holdout']}")
+    ap.add_argument("--latest", action="store_true",
+                    help="--results가 여러 파일(또는 * 패턴)일 때 가장 최신 파일 하나만 쓴다")
     ap.add_argument("--focus-code", default="R6", help="1-7에서 볼 라벨 코드")
     ap.add_argument("--no-v3-relabel", action="store_true", help="holdout H-09·H-13 R2 재라벨을 하지 않음")
     ap.add_argument("--only", default="", help="일부 실험만: 예) 1-1,1-5")
     ap.add_argument("--out", default="", help="보고서 저장 경로 (.md)")
     args = ap.parse_args(argv)
 
+    args.results = resolve_results(args.results, args.latest)
     kind, labels = load_labels(args.answers, not args.no_v3_relabel, args.first_col)
     if kind == "holdout" and args.no_v3_relabel:
         for aid in K.V3_RELABEL:
@@ -343,13 +395,16 @@ def main(argv=None):
     results = [r for r in load_results(args.results) if r.get("answer_id") in labels]
     runs = group_runs(results, labels)
     only = {x.strip() for x in args.only.split(",") if x.strip()}
-    focus_ids = [x.strip() for x in args.focus_ids.split(",") if x.strip()]
+    focus_raw = DEFAULT_FOCUS.get(kind, "") if args.focus_ids is None else args.focus_ids
+    focus_ids = [x.strip() for x in focus_raw.split(",") if x.strip()]
 
     lines = header(results, kind, labels, args)
     if not only or "1-1" in only:
         lines += exp_1_1(results)
-    if kind == "expert" and (not only or only & {"1-2", "1-3"}):
-        lines += exp_1_2(runs, labels, focus_ids)
+    if kind == "expert" and (not only or "1-2" in only):
+        lines += exp_1_2(runs, labels)
+    if focus_ids and (not only or only & {"1-3", "focus"}):
+        lines += exp_focus(runs, labels, focus_ids, kind)
     if not only or "1-5" in only:
         lines += exp_1_5(runs, labels)
     if not only or "1-6" in only:

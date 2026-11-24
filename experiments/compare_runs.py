@@ -1,6 +1,8 @@
 # coding: utf-8
 """
-실험 1-4: 설명문형 답안을 학생 풀이 형태로 바꾼 뒤 판정이 어떻게 달라졌는지 비교.
+두 채점 결과를 답안별로 나란히 비교한다.
+  - 실험 1-4: 설명문형 답안을 학생 풀이 형태로 바꾼 뒤 판정이 어떻게 달라졌는지
+  - 실험 1-1b: 1.3 코드로 재채점한 결과가 11/11 결과(1.2)와 같은지 (--ids all)
 
 변환 전 답안(expert_33)과 변환 후 답안(converted_5)을 각각 run_batch.py로 채점한 결과 JSONL을 받아
 같은 answer_id끼리 나란히 놓는다. 판정 정의는 키트 채점기(score_rv2.py)와 같다. LLM을 부르지 않는다.
@@ -29,18 +31,24 @@ def main(argv=None):
     ap.add_argument("--after", nargs="+", required=True)
     ap.add_argument("--before-answers", required=True)
     ap.add_argument("--after-answers", required=True)
-    ap.add_argument("--ids", default=DEFAULT_IDS)
+    ap.add_argument("--ids", default=DEFAULT_IDS, help="쉼표 구분 answer_id, 또는 all (양쪽 공통 답안 전부)")
+    ap.add_argument("--before-tag", default="변환 전")
+    ap.add_argument("--after-tag", default="변환 후")
+    ap.add_argument("--title", default="1-4 설명문형 답안 변환 전/후 비교")
     ap.add_argument("--out", default="")
     args = ap.parse_args(argv)
 
-    ids = [x.strip() for x in args.ids.split(",") if x.strip()]
     sides = []
-    for tag, res, ans in (("변환 전", args.before, args.before_answers), ("변환 후", args.after, args.after_answers)):
+    for tag, res, ans in ((args.before_tag, args.before, args.before_answers), (args.after_tag, args.after, args.after_answers)):
         _, labels = load_labels(ans)
         runs = group_runs(load_results(res), labels)
         sides.append((tag, labels, runs))
+    if args.ids.strip().lower() == "all":   # 양쪽에 결과가 있는 답안 전부 (재채점 전후 비교용)
+        ids = sorted(set(sides[0][2]) & set(sides[1][2]))
+    else:
+        ids = [x.strip() for x in args.ids.split(",") if x.strip()]
 
-    lines = ["# 1-4 설명문형 답안 변환 전/후 비교", "",
+    lines = [f"# {args.title}", "",
              "판정 정의는 키트와 같다 (주 코드 = 반복 다수결, 첫 오류 줄 = matched_criterion).", "",
              "| answer_id | 구분 | 라벨 코드 | 라벨 첫 줄 | AI 회차별 | 다수결 | AI 첫 줄 (회차별) | J (회차별) | 코드 일치 |",
              "| --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
@@ -63,8 +71,9 @@ def main(argv=None):
                          f"{' / '.join('없음' if f is None else str(f) for f in firsts)} | {' / '.join(str(j) for j in js)} | "
                          f"{'일치' if K.is_match(maj, lab['code']) else '불일치'} |")
         changed += int(len(majs) == 2 and majs[0] != majs[1])
-    lines += ["", f"다수결 판정이 달라진 답안: {changed}/{len(ids)}", "",
-              "변환 후 답안의 라벨은 오세준 교수님 확인 대상 (할 일: '수정한 5건과 통일한 라벨 확인')."]
+    lines += ["", f"다수결 판정이 달라진 답안: {changed}/{len(ids)}"]
+    if args.title.startswith("1-4"):
+        lines += ["", "변환 후 답안의 라벨은 오세준 교수님 확인 대상 (할 일: '수정한 5건과 통일한 라벨 확인')."]
     text = "\n".join(lines)
     print(text)
     if args.out:
