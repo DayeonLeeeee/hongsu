@@ -7,6 +7,7 @@ from flask.typing import ResponseReturnValue
 
 import rv2_codebook
 import rv2_grader
+import usage_cost
 from hongsu import clients, db
 from hongsu.config import ANTHROPIC_API_KEY, BASE_DIR
 from hongsu.utils import now_iso
@@ -53,6 +54,31 @@ def health() -> ResponseReturnValue:
     if not all(c["ok"] for c in checks.values()):
         body["status"] = "degraded"
         return jsonify(body), 503
+    return jsonify(body)
+
+
+_STARTED = now_iso()
+
+
+@bp.route("/admin/usage", methods=["GET"])
+def usage() -> ResponseReturnValue:
+    """API 사용량과 비용.
+    process: 서버가 켜진 뒤 누적 (채점·OCR 수정·OCR 호출, 재시작하면 0).
+    db: 채점 기록(rv2_gradings)의 날짜(서울)·모델별 합계, ?days=14. Postgres(DATABASE_URL)일 때만."""
+    from hongsu.guard import get_int
+    days = get_int(dict(request.args), "days", 14, 1, 366)
+    body = {"success": True, "prices_checked": usage_cost.PRICES_CHECKED, "process_since": _STARTED,
+            "process": usage_cost.snapshot()}
+    if db.enabled():
+        try:
+            rows = db.usage_by_day(days)
+            body["db"] = {"days": days, "by_day_model": rows,
+                          "total_cost_usd": round(sum(r["cost_usd"] for r in rows), 6),
+                          "total_gradings": sum(r["gradings"] for r in rows)}
+        except Exception as e:
+            body["db"] = {"error": f"{type(e).__name__}: {str(e)[:200]}"}
+    else:
+        body["db"] = None
     return jsonify(body)
 
 

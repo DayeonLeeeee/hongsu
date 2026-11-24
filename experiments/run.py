@@ -201,8 +201,13 @@ def compare(argv, name):
     return out
 
 
+# 11/11 Opus 5.5 결과의 호출 1회당 평균 비용 (experiments/usage_report.py, 가격표 2026-11-25). 다른 모델이면 참고만.
+COST_PER_CALL_OPUS55 = 0.049
+
+
 def confirm(calls, what, yes):
-    say(f"\n{what}: Claude API 약 {calls}회 호출 (모델 {model_name()}, 비용 발생)")
+    est = f", 약 ${calls * COST_PER_CALL_OPUS55:.1f}" if "opus-5-5" in model_name() else ""
+    say(f"\n{what}: Claude API 약 {calls}회 호출 (모델 {model_name()}, 비용 발생{est})")
     if yes:
         return
     try:

@@ -204,3 +204,47 @@ def test_regression_main_returns_nonzero_on_change_and_saves_baseline(tmp_path, 
     assert R.main(["--compare", run, "--baseline", base]) == 0
     changed = _write(tmp_path / "r2.jsonl", [_rec(i, outcome="review") for i in R.REGRESSION_IDS])
     assert R.main(["--compare", changed, "--baseline", base]) == 1
+
+
+# ── API 사용량·비용 (Day 6) ───────────────────────────────
+
+
+def test_call_cost_uses_model_price_and_date_suffix():
+    import usage_cost as U
+    u = {"input_tokens": 1_000_000, "output_tokens": 100_000, "cache_read_input_tokens": 1_000_000}
+    assert U.call_cost("claude-opus-5-5", u) == pytest.approx(4 + 2 + 0.2)
+    assert U.call_cost("claude-haiku-4-5-20251001", {"input_tokens": 2000, "output_tokens": 1000}) == pytest.approx(0.007)
+    assert U.call_cost("unknown-model", u) is None and U.call_cost("claude-opus-5-5", None) is None
+
+
+def test_record_cost_sums_calls_by_responding_model():
+    import usage_cost as U
+    rec = {"model": "claude-opus-5-5", "n_calls": 2, "raw_responses": [
+        {"model": "claude-opus-5-5", "usage": {"input_tokens": 5000, "output_tokens": 1000}},
+        {"model": "claude-opus-4-6", "usage": {"input_tokens": 5000, "output_tokens": 1000}}]}
+    assert U.record_cost(rec) == pytest.approx(0.02 + 0.02 + 0.025 + 0.025)
+    assert U.record_cost({"n_calls": 0, "raw_responses": []}) == 0.0
+    rec["raw_responses"][1]["model"] = "mystery"
+    assert U.record_cost(rec) is None          # 가격 모르는 호출이 있으면 추정하지 않음
+
+
+def test_diagnose_records_cost():
+    from tests.test_rv2_sanitize import FakeClient, _tool_block
+    rec = g.diagnose(FakeClient([[_tool_block(good())]]), PID, ANSWER, model="claude-opus-5-5")
+    assert rec["cost_usd"] == pytest.approx((10 * 4 + 5 * 20) / 1_000_000)   # 가짜 응답: 입력 10, 출력 5 토큰
+
+
+def test_usage_summary_and_report(tmp_path):
+    import usage_cost as U
+    import usage_report
+    recs = [{"n_calls": 1, "cost_usd": 0.05, "usage": {"input_tokens": 100, "output_tokens": 10}},
+            {"n_calls": 2, "model": "claude-opus-5-5", "raw_responses": [
+                {"usage": {"input_tokens": 1000, "output_tokens": 100}},
+                {"usage": {"input_tokens": 1000, "output_tokens": 100}}],
+             "usage": {"input_tokens": 2000, "output_tokens": 200}}]
+    s = U.summarize(recs)
+    assert s["records"] == 2 and s["calls"] == 3 and s["input_tokens"] == 2100
+    assert s["cost_usd"] == pytest.approx(0.05 + 0.012, abs=1e-4)
+    p = tmp_path / "r.jsonl"
+    p.write_text("\n".join(json.dumps(r) for r in recs), encoding="utf-8")
+    assert "| r.jsonl | 2 | 3 | 2,100 | 210 | $0.06 |" in usage_report.main([str(p)])

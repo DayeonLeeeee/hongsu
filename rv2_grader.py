@@ -37,6 +37,7 @@ import subprocess
 from typing import Any, Dict, Optional, Tuple
 
 import rv2_codebook
+import usage_cost
 from prompts import rv2 as p_rv2
 
 # 모델별 호출 기본값 (11/11 모델 비교 실험에서 확인한 제약).
@@ -470,6 +471,7 @@ def diagnose(client: Any, problem_id: str, answer_text: str, mode: str = "with_c
         rec["validation_issues"] = issues
     except Exception as e:
         rec["error"] = f"{type(e).__name__}: {e}"
+    rec["cost_usd"] = usage_cost.record_cost(rec)   # 호출별 실제 응답 모델 가격 (usage_cost.PRICES)
     return rec
 
 

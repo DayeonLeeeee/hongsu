@@ -62,6 +62,7 @@ def grade_remote(url: str, row: dict) -> dict:
         "response_models": d.get("response_models"),
         "codebook_version": d.get("codebook_version"), "xlsx_sha8": d.get("xlsx_sha8"),
         "allowed_codes": d.get("allowed_codes"), "usage": d.get("usage"), "n_calls": d.get("n_calls"),
+        "cost_usd": d.get("cost_usd"),
         "stop_reasons": d.get("stop_reasons"), "validation_issues": d.get("validation_issues"),
         "tool_choice": d.get("tool_choice"), "extraction": d.get("extraction"),
         "first_issues": d.get("first_issues"),

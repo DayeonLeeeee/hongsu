@@ -25,7 +25,7 @@ EXPECTED_ROUTES = {
     "PUT /admin/problems/<pid>", "DELETE /admin/problems/<pid>", "POST /admin/problems/bulk",
     "POST /admin/rv2/reload", "POST /master_solution",
     "POST /results", "GET /results", "GET /results/<rid>", "GET /stats/error_distribution",
-    "GET /results/export", "GET /health", "GET /admin", "GET /student", "GET /manifest.json",
+    "GET /results/export", "GET /health", "GET /admin/usage", "GET /admin", "GET /student", "GET /manifest.json",
 }
 
 
@@ -62,6 +62,8 @@ def env(monkeypatch):
     monkeypatch.setattr(clients, "get_gemini_model", lambda: FakeGemini())
     from hongsu import guard
     guard.reset()   # 요청 횟수 카운터는 테스트마다 새로
+    import usage_cost
+    usage_cost.reset()
     return SimpleNamespace(client=hongsu_server.app.test_client(), app=hongsu_server.app, claude=fake)
 
 
@@ -254,6 +256,9 @@ def test_postgres_real_roundtrip(env, monkeypatch):
                            "FROM rv2_gradings").fetchone()
     assert row[0] == text and row[1][1]["code"] == "R8" and row[2] == "graded"
     assert row[3] is False and row[4] is True
+    days = db.usage_by_day(7)
+    assert days[0]["gradings"] == 1 and days[0]["cost_usd"] > 0 and days[0]["unpriced"] == 0
+    assert env.client.get("/admin/usage").get_json()["db"]["total_gradings"] == 1
 
 
 # ── 입력 검증·요청 횟수 제한·재현성 (Day 5) ───────────────────
@@ -352,3 +357,15 @@ def test_code_commit_prefers_deploy_env(monkeypatch):
     monkeypatch.setattr(rv2_grader, "_COMMIT_DONE", False)
     monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", "0123456789abcdef0123")
     assert rv2_grader.code_commit() == "0123456789ab"
+
+
+def test_usage_endpoint_counts_grade_and_refine(env):
+    c = env.client
+    j = c.post("/grade", json={"problem_id": "INV-R-01", "solution_text": ANSWER}).get_json()
+    assert j["cost_usd"] == pytest.approx((1 * 4 + 1 * 20) / 1_000_000)     # FakeClaude: 1/1 토큰, Opus 5.5
+    c.post("/refine", json={"image": "QUJD", "current_text": "a", "instruction": "b"})
+    c.post("/grade", json={"problem_id": "INV-R-01", "solution_text": ""})   # 백지: 호출 없음 → 세지 않음
+    u = c.get("/admin/usage").get_json()
+    kinds = {(r["kind"], r["requests"]) for r in u["process"]}
+    assert ("grade", 1) in kinds and ("refine", 1) in kinds and u["db"] is None
+    assert u["prices_checked"] and c.get("/admin/usage?days=0").status_code == 400

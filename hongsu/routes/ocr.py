@@ -5,9 +5,10 @@ import json
 from flask import Blueprint, jsonify
 from flask.typing import ResponseReturnValue
 
+import usage_cost
 from hongsu import clients
 from hongsu import ocr as ocr_service
-from hongsu.config import MAX_ANSWER_CHARS, MODEL_HAIKU
+from hongsu.config import MAX_ANSWER_CHARS, MODEL_GEMINI, MODEL_HAIKU
 from hongsu.guard import BadInput, get_str, json_body, rate_limited
 from hongsu.logging_setup import log
 from hongsu.utils import make_image_block, normalize_plain, now_iso, parse_tool_use
@@ -61,6 +62,8 @@ def ocr_endpoint() -> ResponseReturnValue:
         f_gemini  = ocr_service.submit_with_context(ocr_service.call_gemini_ocr, image_b64, mime_type)
         mathpix_result = f_mathpix.result()
         gemini_result  = f_gemini.result()
+        usage_cost.add("ocr", "mathpix", None, None)        # 호출 수만 센다 (토큰 단위 과금이 아님)
+        usage_cost.add("ocr", MODEL_GEMINI, None, None)
 
         log.info(f"→ Mathpix: {mathpix_result[:60]}")
         log.info(f"→ Gemini: {json.dumps(gemini_result, ensure_ascii=False)[:100]}")
@@ -118,12 +121,20 @@ def refine_endpoint() -> ResponseReturnValue:
                 ]
             }],
         )
+        u = getattr(response, "usage", None)
+        usage = {k: (getattr(u, k, 0) or 0) for k in ("input_tokens", "output_tokens",
+                                                     "cache_creation_input_tokens", "cache_read_input_tokens")}
+        model = getattr(response, "model", None) or MODEL_HAIKU
+        cost = usage_cost.call_cost(model, usage)
+        usage_cost.add("refine", model, usage, cost)
         result = parse_tool_use(response)
         result["corrected_text"] = normalize_plain(result.get("corrected_text", ""))
         result["success"] = True
         result["timestamp"] = now_iso()
 
-        log.info(f"[수정 완료] changes={result.get('changes')}, agreement={result.get('image_agreement')}")
+        result["usage"], result["cost_usd"] = usage, cost
+        log.info(f"[수정 완료] changes={result.get('changes')}, agreement={result.get('image_agreement')} "
+                 f"tokens={usage['input_tokens']}/{usage['output_tokens']} cost=${cost if cost is not None else '?'}")
         return jsonify(result)
 
     except BadInput:

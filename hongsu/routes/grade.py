@@ -5,6 +5,7 @@ from flask.typing import ResponseReturnValue
 
 import rv2_codebook
 import rv2_grader
+import usage_cost
 from hongsu import clients, storage
 from hongsu.config import MAX_ANSWER_CHARS, MAX_ATTEMPTS_BEFORE_REVEAL, MAX_STEPS
 from hongsu.guard import INTERNAL_FLAG, BadInput, get_int, get_str, json_body, rate_limited
@@ -119,6 +120,7 @@ def grade_rv2_endpoint() -> ResponseReturnValue:
             "timestamp": now_iso(),
             "n_calls": rec.get("n_calls"),
             "usage": rec.get("usage"),
+            "cost_usd": rec.get("cost_usd", 0.0),           # 이 답안 채점 비용 (USD, 재시도 포함)
             "stop_reasons": rec.get("stop_reasons"),
             "tool_choice": rec.get("tool_choice"),
             "extraction": rec.get("extraction", []),        # 호출별 결과 출처 tool/text/none (스키마 안정성 측정)
@@ -136,7 +138,11 @@ def grade_rv2_endpoint() -> ResponseReturnValue:
 
         log.info(f"[R v2 완료] outcome={outcome} sources={review_sources} main={result['main_error_code']} J={result['justification_level']} "
               f"complete={result['response_complete']} missing={result['missing_criteria']} "
-              f"review={review_needed} calls={rec.get('n_calls')} issues={rec.get('validation_issues')}")
+              f"review={review_needed} calls={rec.get('n_calls')} issues={rec.get('validation_issues')} "
+              f"tokens={(rec.get('usage') or {}).get('input_tokens', 0)}/{(rec.get('usage') or {}).get('output_tokens', 0)} "
+              f"cost=${result['cost_usd'] if result['cost_usd'] is not None else '?'}")
+        if rec.get("n_calls"):
+            usage_cost.add("grade", rec.get("model"), rec.get("usage"), result["cost_usd"], rec.get("n_calls") or 0)
         status = 200 if result["success"] else 502
         return jsonify(result), status
 

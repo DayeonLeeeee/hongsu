@@ -22,7 +22,7 @@ RV2_COLUMNS = {
     "model": "text", "n_calls": "integer", "usage": "jsonb", "stop_reasons": "jsonb", "raw_responses": "jsonb",
     "request_id": "text", "outcome": "text", "review_sources": "jsonb", "grader_version": "text",
     "tool_choice": "text", "response_models": "jsonb", "extraction": "jsonb", "first_issues": "jsonb",
-    "reveal_answer": "boolean", "feedback": "jsonb", "git_commit": "text",
+    "reveal_answer": "boolean", "feedback": "jsonb", "git_commit": "text", "cost_usd": "numeric",
 }
 
 _DDL = ["CREATE TABLE IF NOT EXISTS rv2_gradings ("
@@ -81,6 +81,24 @@ def insert_rv2(row: dict) -> None:
            f"VALUES ({', '.join(['%s'] * len(cols))})")
     with _connect() as conn:
         conn.execute(sql, [_value(c, row[c]) for c in cols])
+
+
+def usage_by_day(days: int = 14) -> list:
+    """/admin/usage용: 날짜(서울)·모델별 채점 수, 호출 수, 토큰, 비용."""
+    ensure_table()
+    sql = """
+        SELECT to_char(created_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD') AS day, model,
+               count(*), coalesce(sum(n_calls), 0),
+               coalesce(sum((usage->>'input_tokens')::bigint), 0),
+               coalesce(sum((usage->>'output_tokens')::bigint), 0),
+               coalesce(sum(cost_usd), 0), count(*) FILTER (WHERE cost_usd IS NULL)
+        FROM rv2_gradings
+        WHERE created_at >= now() - make_interval(days => %s)
+        GROUP BY 1, 2 ORDER BY 1 DESC, 2"""
+    with _connect() as conn:
+        rows = conn.execute(sql, [days]).fetchall()
+    return [{"day": d, "model": m, "gradings": n, "calls": int(c), "input_tokens": int(i), "output_tokens": int(o),
+             "cost_usd": round(float(cost), 6), "unpriced": int(up)} for d, m, n, c, i, o, cost, up in rows]
 
 
 def check() -> dict:

@@ -247,6 +247,7 @@ python experiments/regression.py --compare <run.jsonl>   # 이미 돌린 결과�
 | `ocr_compare.py` | OCR 엔진 비교 | `--samples answers/ocr/ocr_samples.csv --engines gemini,claude` |
 | `prepare_answers.py` | 답안 파일 준비 | `--kit <rv2_kit>` |
 | `../run_batch.py` | 채점 (API 호출) | `--answers answers/expert_33.csv --repeats 3` |
+| `usage_report.py` | 결과 파일의 호출 수·토큰·비용 (11/11 Opus 5.5: 답안당 약 $0.04~0.05) | `results/stage3_expert_33_*.jsonl` |
 
 `score_experiments.py`의 주요 옵션: `--first-col`(첫 오류 라벨 열 바꾸기), `--focus-ids`(지정 답안, 빈 문자열이면 생략), `--focus-code`(1-7 코드, 기본 R6), `--latest`(여러 파일·`*` 패턴 중 최신 하나만), `--no-v3-relabel`, `--only`, `--out`.
 `*` 패턴은 따옴표로 감싼다 (macOS zsh는 따옴표 없이 쓰면 패턴이 안 맞을 때 에러가 난다).
