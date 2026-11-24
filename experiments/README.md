@@ -196,6 +196,18 @@ python experiments/run.py 1-8 --engines gemini,claude # 일부 엔진만
 
 ---
 
+## 프롬프트 회귀 테스트 (실험 3-3)
+
+프롬프트나 채점 코드를 바꿀 때마다 고정 답안 20개(문항마다 오답 1 + 오탐검사 1, expert 원본에서, holdout 제외)를 다시 채점해 기준과 비교한다. 키트 없이 돈다.
+
+```
+python experiments/regression.py --save-baseline   # 처음 한 번 (API 20회). 기준은 experiments/regression/baseline.jsonl
+python experiments/regression.py                   # 바꾼 뒤마다 (API 20회). 바뀐 답안 표 + 종료 코드 1
+python experiments/regression.py --compare <run.jsonl>   # 이미 돌린 결과만 다시 비교 (비용 0)
+```
+
+비교 항목은 주 코드, 첫 오류 줄, J, outcome, 미완 여부. 바뀐 건은 한 번 더 돌려 우연인지 확인하고, 의도한 변경이면 `--save-baseline`으로 기준을 갱신한 뒤 커밋 메시지에 적는다.
+
 ## 돌린 뒤 돌려줄 것
 
 - `experiments/out/` 폴더 전체 (보고서 .md)

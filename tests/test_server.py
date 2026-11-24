@@ -32,6 +32,7 @@ EXPECTED_ROUTES = {
 class FakeClaude:
     def __init__(self):
         self.calls = []
+        self.result = None   # 채점 응답을 바꾸려면 테스트에서 dict를 넣는다
         self.messages = SimpleNamespace(create=self._create)
         self.models = SimpleNamespace(retrieve=lambda m: SimpleNamespace(id=m))
 
@@ -40,7 +41,7 @@ class FakeClaude:
         if kw["tools"][0]["name"] == "refine_ocr_text":
             inp = {"corrected_text": "f(1) = \\frac{1}{2}", "changes": ["1/2"], "image_agreement": "matches", "note": ""}
         else:
-            inp = good()
+            inp = self.result or good()
         return SimpleNamespace(content=[_tool_block(inp)], stop_reason="end_turn", model=kw["model"],
                                usage=SimpleNamespace(input_tokens=1, output_tokens=1,
                                                      cache_creation_input_tokens=0, cache_read_input_tokens=0))
@@ -154,3 +155,100 @@ def test_postgres_storage_when_database_url_set(env, monkeypatch):
     assert r.get_json()["success"]          # 저장 실패해도 채점은 응답
     j = env.client.get("/health?deep=1").get_json()
     assert j["checks"]["db"]["ok"] is False and "supabase" not in j["checks"]
+
+
+# ── 통합: /grade 전체 흐름 ──────────────────────────────────
+
+
+def _saved(monkeypatch):
+    from hongsu import storage
+    rows = []
+    monkeypatch.setattr(storage, "save_rv2", lambda r: rows.append(r))
+    return rows
+
+
+def test_grade_from_ocr_steps_numbers_lines_and_saves(env, monkeypatch):
+    """학생 화면 경로: OCR로 확인한 단계(solution_steps) → 줄 번호 붙은 답안으로 채점·저장."""
+    rows = _saved(monkeypatch)
+    steps = [{"index": 1, "text": "f(1)=a"}, {"index": 2, "text": "f^(-1)(a)=2"}]
+    j = env.client.post("/grade", json={"problem_id": "INV-R-01", "solution_steps": steps,
+                                        "student_id": "s1", "attempt_count": 2}).get_json()
+    assert j["success"] and j["outcome"] == "graded"
+    assert "1) f(1)=a\n2) f^(-1)(a)=2" in env.claude.calls[0]["messages"][0]["content"]
+    assert len(rows) == 1 and rows[0]["answer_text"] == "1) f(1)=a\n2) f^(-1)(a)=2"
+    assert rows[0]["student_id"] == "s1" and rows[0]["raw_responses"] and rows[0]["reveal_answer"] is False
+
+
+def test_grade_image_only_is_rejected_without_llm(env):
+    r = env.client.post("/grade", json={"problem_id": "INV-R-01", "solution_image_b64": "QUJD"})
+    assert r.status_code == 400 and env.claude.calls == []
+
+
+def test_grade_abstain_goes_to_review_and_reveal_after_3_wrong(env, monkeypatch):
+    rows = _saved(monkeypatch)
+    res = good()
+    res.update(main_error_code=None, review_needed=True, review_reason="기준표 밖 오류")
+    env.claude.result = res
+    j = env.client.post("/grade", json={"problem_id": "INV-R-01", "solution_text": ANSWER,
+                                        "attempt_count": 4}).get_json()
+    assert j["outcome"] == "review" and j["review_sources"] == ["model"] and j["review_needed"]
+    assert j["reveal_answer"] is True and rows[0]["outcome"] == "review"
+
+
+def test_grade_incomplete_answer(env):
+    res = good()
+    res.update(response_complete=False, missing_criteria=["5"])
+    env.claude.result = res
+    j = env.client.post("/grade", json={"problem_id": "INV-R-01", "solution_text": ANSWER}).get_json()
+    assert j["outcome"] == "incomplete" and j["missing_criteria"] == [5]
+
+
+def test_grade_api_failure_still_answers_with_error(env, monkeypatch):
+    def boom(**kw):
+        raise RuntimeError("overloaded")
+    monkeypatch.setattr(env.claude.messages, "create", boom)
+    j = env.client.post("/grade", json={"problem_id": "INV-R-01", "solution_text": ANSWER}).get_json()
+    assert j["success"] is False and j["outcome"] == "error" and "overloaded" in j["error"]
+
+
+# ── 통합: /admin/problems ──────────────────────────────────
+
+
+def test_problem_list_filter_and_bulk(env):
+    c = env.client
+    added = c.post("/admin/problems/bulk", json={"problems": [{"title": "a", "unit": "유리함수"},
+                                                             {"id": "Z1", "title": "b", "unit": "유리함수"}]})
+    ids = added.get_json()["added_ids"]
+    assert ids[1] == "Z1" and len(ids) == 2
+    j = c.get("/admin/problems?unit=유리함수").get_json()
+    assert {p["id"] for p in j["problems"]} >= set(ids) and all(p["unit"] == "유리함수" for p in j["problems"])
+    assert any(p["id"] == "INV-R-01" for p in c.get("/admin/problems").get_json()["problems"])
+    for pid in ids:
+        c.delete(f"/admin/problems/{pid}")
+
+
+def test_problem_unknown_id_is_404(env):
+    c = env.client
+    assert c.get("/admin/problems/NOPE").status_code == 404
+    assert c.put("/admin/problems/NOPE", json={"title": "x"}).status_code == 404
+    assert c.delete("/admin/problems/NOPE").status_code == 404
+
+
+@pytest.mark.skipif(not os.environ.get("TEST_DATABASE_URL"), reason="실제 PostgreSQL이 있을 때만 (TEST_DATABASE_URL)")
+def test_postgres_real_roundtrip(env, monkeypatch):
+    """빈 DB에 테이블을 만들고, /grade 결과가 jsonb·한글까지 그대로 들어가는지."""
+    import psycopg
+    import hongsu.db as db
+    url = os.environ["TEST_DATABASE_URL"]
+    with psycopg.connect(url) as conn:
+        conn.execute("DROP TABLE IF EXISTS rv2_gradings")
+    monkeypatch.setattr(db, "DATABASE_URL", url)
+    monkeypatch.setattr(db, "_ready", False)
+    text = ANSWER + "\n3) 답 5 (f⁻¹ 확인)"
+    env.client.post("/grade", json={"problem_id": "INV-R-01", "solution_text": text})
+    assert db.check() == {"ok": True, "backend": "postgres", "rows": 1}
+    with psycopg.connect(url) as conn:
+        row = conn.execute("SELECT answer_text, lines, outcome, reveal_answer, raw_responses IS NOT NULL "
+                           "FROM rv2_gradings").fetchone()
+    assert row[0] == text and row[1][1]["code"] == "R8" and row[2] == "graded"
+    assert row[3] is False and row[4] is True

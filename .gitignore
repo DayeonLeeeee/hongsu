@@ -11,3 +11,5 @@ answers/.kit_path
 
 # macOS 가상환경
 .venv/
+experiments/regression/run_*.jsonl
+experiments/regression/report_*.md

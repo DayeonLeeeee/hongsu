@@ -34,10 +34,16 @@ def normalize_plain(text: str) -> str:
     if not text:
         return ""
     s = text
-    # LaTeX \frac → (a/b)
-    s = re.sub(r'\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}', r'(\1/\2)', s)
-    # \sqrt{n} → √n
-    s = re.sub(r'\\sqrt\s*\{([^{}]+)\}', r'√\1', s)
+    # LaTeX \frac → (a/b). 분자·분모가 식이면 괄호로 감싼다: \frac{x-2}{3} → ((x-2)/3)
+    #   (예전에는 (x-2/3)이 되어 x − 2/3으로 읽혔다)
+    def _frac(m: "re.Match") -> str:
+        a, b = (t.strip() for t in m.groups())
+        wrap = lambda t: t if re.fullmatch(r"[\w.√^]+", t) else f"({t})"  # noqa: E731
+        return f"({wrap(a)}/{wrap(b)})"
+    s = re.sub(r'\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}', _frac, s)
+    # \sqrt{n} → √n, 식이면 √(x+1)  (√x+1로 두면 √x + 1로 읽힌다)
+    s = re.sub(r'\\sqrt\s*\{([^{}]+)\}',
+               lambda m: "√" + (m.group(1) if re.fullmatch(r"[\w.^]+", m.group(1).strip()) else f"({m.group(1).strip()})"), s)
     # \log_{n} → log_n
     s = re.sub(r'\\log_\s*\{([^{}]+)\}', r'log_\1', s)
     s = re.sub(r'\\log', 'log', s)
