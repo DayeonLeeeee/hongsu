@@ -3,6 +3,7 @@
 교수님 점검(다음 미팅) 없이 우리끼리 먼저 하기로 한 실험을 정리했다. 두 종류다.
 
 - **먼저 바꾼 것 검증**: 교수님 확인 없이 먼저 적용한 코드 변경(hongsu 1.3 안정화, 채점 모델 Opus 5.5)이 결과를 바꾸지 않았는지 → 1-1
+- **코드 개선 후 재확인**: 교수님께 여쭙기 전에, 코드를 고친 뒤에도 같은 현상이 나는지 먼저 볼 답안 (H-03·H-33, H-10·A-07-B, H-15) → 1-9
 - **미팅에 가져갈 숫자**: 교수님께 여쭐 질문의 근거 → 1-2 ~ 1-8
 
 미팅에서 결정을 받은 뒤에 하는 실험(확신도 기준선, 기권 차단 프롬프트, 캐스케이드, 주 코드 선정 규칙)은 여기 없다.
@@ -46,6 +47,7 @@
 | 1-6 미완 답안 | 미완 판정, 미완인데 R3가 붙은 경우 | opus55 expert·holdout | expert_33, holdout45 | 없음 | 아니오 | **완료** |
 | 1-7 R6 사례 | R6 라벨 답안의 AI 판정과 사유 | opus55 holdout | holdout45 | 없음 | 아니오 | **완료** |
 | 1-8 손글씨 OCR | 엔진별 한글·수식 인식률, 교정 위험, 채점 변화 | 새로 만듦 | ocr_samples | **손글씨 30~50장 + 정답 타이핑** | **예** (OCR API) | 수집 대기 |
+| 1-9 코드 개선 후 재확인 | H-03·H-33 주 코드, H-10·A-07-B 기준표, H-15 R6가 1.3에서도 같은지 | 1-1b 결과 (+ 11/11 비교) | holdout45, expert_33 | 없음 | 1-1b와 같이 (추가 비용 없음) | 11/11 기준 표 완료, 1.3 대기 |
 
 완료된 보고서: `rv2_kit/results/experiments_20261124/` (expert33·holdout45 각 1개)
 
@@ -99,12 +101,14 @@ python run_batch.py --answers answers/holdout45.csv --repeats 3
 ```
 → `results/stage3_expert_33_claude-opus-5-5_R-v3_<시각>.jsonl`, `results/stage3_holdout45_claude-opus-5-5_R-v3_<시각>.jsonl`
 
+아래 명령은 시각을 직접 치지 않도록 `*` 패턴과 `--latest`(가장 최신 파일 하나만 사용)를 쓴다. 같은 답안을 여러 번 돌렸어도 최신 실행만 집계된다.
+
 2) 1.3 안정성 (첫 호출 형식 문제·재시도 사유까지 나온다):
 ```powershell
-python experiments/score_experiments.py --results results/stage3_expert_33_claude-opus-5-5_R-v3_<시각>.jsonl `
+python experiments/score_experiments.py --latest --results "results\stage3_expert_33_claude-opus-5-5_*.jsonl" `
   --answers answers/expert_33.csv --out experiments/out/1-1b_expert33_report.md
-python experiments/score_experiments.py --results results/stage3_holdout45_claude-opus-5-5_R-v3_<시각>.jsonl `
-  --answers answers/holdout45.csv --focus-ids "" --out experiments/out/1-1b_holdout45_report.md
+python experiments/score_experiments.py --latest --results "results\stage3_holdout45_claude-opus-5-5_*.jsonl" `
+  --answers answers/holdout45.csv --out experiments/out/1-1b_holdout45_report.md
 ```
 
 3) 1.2(11/11)와 판정 비교:
@@ -118,6 +122,8 @@ python experiments/compare_runs.py --ids all --title "1-1b holdout 1.2 vs 1.3" -
   --after results/stage3_holdout45_claude-opus-5-5_R-v3_<시각>.jsonl --after-answers answers/holdout45.csv `
   --out experiments/out/1-1b_holdout45_compare.md
 ```
+(`compare_runs.py`에는 `--latest`가 없어서 `<시각>` 자리에 실제 파일 이름을 넣는다. `dir results`로 확인.)
+
 볼 것: 비교 보고서 맨 아래 "다수결 판정이 달라진 답안" 수. 0~1건이면 1.3 변경이 판정에 영향 없다고 말할 수 있다. 여러 건이면 달라진 답안의 모델 사유를 보고 형식 규칙 탓인지 확인한다.
 비용 감: 11/11 자료 기준 Opus 5.5 holdout 3회 약 $6.4, expert 3회도 비슷한 규모.
 
@@ -133,7 +139,7 @@ python experiments/compare_runs.py --ids all --title "1-1b holdout 1.2 vs 1.3" -
 2) 같은 결과 파일로 다시 분석:
 ```powershell
 python experiments/score_experiments.py --results "$KIT\results\stage3_expert_33_opus55_20261111_1422.jsonl" `
-  --answers answers/expert_33.csv --first-col 전문가_첫오류_통일 --only 1-2,1-3 `
+  --answers answers/expert_33.csv --first-col 전문가_첫오류_통일 --only 1-2,focus `
   --out experiments/out/1-2_unified.md
 ```
 라벨은 기준표를 보고 사람이 정한다. 보고서의 'AI 첫 줄'을 보고 라벨을 맞추면 평가 데이터가 오염된다.
@@ -141,7 +147,7 @@ python experiments/score_experiments.py --results "$KIT\results\stage3_expert_33
 
 ## 1-3 A-05-B·A-07-B — 완료 (1-2 뒤 한 번 더)
 
-결과: 두 답안 모두 코드는 3회 모두 맞음(R6, R2). 첫 오류 줄만 라벨과 다름(1 vs 3, 3 vs 4) → 라벨 번호 문제로 보인다. 1-2 명령의 출력에 1-3 표도 같이 나온다.
+결과: 두 답안 모두 코드는 3회 모두 맞음(R6, R2). 첫 오류 줄만 라벨과 다름(1 vs 3, 3 vs 4) → 라벨 번호 문제로 보인다. 보고서의 '지정 답안 확인' 섹션(`--only focus`)에 나온다.
 
 ## 1-4 설명문형 5건 변환 — 새 채점 15호출
 
@@ -169,7 +175,7 @@ python experiments/compare_runs.py `
 진짜 손실(라벨에 코드가 있는데 기권)은 **H-15 1건**. 나머지 기권은 모두 '코드 없음' 라벨 답안이다. 보고서의 기권 목록이 이용오 교수님 재문의에 넣을 답안 ID다.
 ```powershell
 python experiments/score_experiments.py --results "$KIT\results\stage3_holdout45_opus55_20261111_1531.jsonl" `
-  --answers answers/holdout45.csv --focus-ids "" --only 1-5
+  --answers answers/holdout45.csv --only 1-5
 ```
 
 ## 1-6 미완 답안 — 완료, 비용 0
@@ -178,7 +184,7 @@ python experiments/score_experiments.py --results "$KIT\results\stage3_holdout45
 다만 holdout에서 코드가 붙은 답안 5건(H-12, H-18, H-25, H-30, H-45)도 AI가 한 번 이상 `response_complete=false`로 표시했다. 코드북의 `response_complete`는 '요구 기준을 다 다뤘나'이고 담론 2번의 미완은 '중간에 멈췄나'라서, 미완 처리 규칙을 정하기 전에 이 차이를 정리해야 한다.
 ```powershell
 python experiments/score_experiments.py --results "$KIT\results\stage3_holdout45_opus55_20261111_1531.jsonl" `
-  --answers answers/holdout45.csv --focus-ids "" --only 1-6
+  --answers answers/holdout45.csv --only 1-6
 ```
 
 ## 1-7 R6 사례 — 완료, 비용 0
@@ -186,8 +192,31 @@ python experiments/score_experiments.py --results "$KIT\results\stage3_holdout45
 결과: R6 라벨 3건 중 H-15만 기권. 모델 사유: "R6은 y에 대해 정리하는 과정의 이항·부호 오류로 정의돼 있는데, 이 학생은 정리는 옳게 하고 상수항 부호를 잘못 읽었다" → R6 정의 범위 질문의 근거.
 ```powershell
 python experiments/score_experiments.py --results "$KIT\results\stage3_holdout45_opus55_20261111_1531.jsonl" `
-  --answers answers/holdout45.csv --focus-ids "" --only 1-7 --focus-code R6
+  --answers answers/holdout45.csv --only 1-7 --focus-code R6
 ```
+
+## 1-9 코드 개선 후 재확인 — 1-1b 결과로, 추가 비용 없음
+
+교수님께 바로 여쭙지 않고 "코드를 고친 뒤에도 같은 현상이면 그때 건의"하기로 한 답안이다.
+
+| 답안 | 현상 (11/11) | 1.3에서도 같으면 |
+| --- | --- | --- |
+| H-03, H-33 | 오류가 두 개인 답안에서 모델은 앞 줄, 라벨은 뒤 줄 코드를 고름 | 주 코드 선정 기준을 교수님께 여쭘 (오세준 교수님 견해 R1) |
+| H-10, A-07-B | 모델이 기준표 문구를 따라 라벨과 다른 유형을 고름 | 기준표 점검 요청 |
+| H-15 | 부호 오류를 R6로 보지 않고 기권 | R6 정의 범위 수정 건의 |
+
+보고서의 **'지정 답안 확인'** 섹션에 나온다 (기본값: holdout은 H-03·H-33·H-10·H-15, expert는 A-05-B·A-07-B). 1회차의 오류 줄(학생 줄→기준 번호:코드)과 모델 사유를 같이 보여 준다.
+```powershell
+# 11/11 기준 (지금 바로)
+python experiments/score_experiments.py --results "$KIT\results\stage3_holdout45_opus55_20261111_1531.jsonl" `
+  --answers answers/holdout45.csv --only focus
+# 1.3 (1-1b 재채점 후)
+python experiments/score_experiments.py --latest --results "results\stage3_holdout45_claude-opus-5-5_*.jsonl" `
+  --answers answers/holdout45.csv --only focus
+python experiments/score_experiments.py --latest --results "results\stage3_expert_33_claude-opus-5-5_*.jsonl" `
+  --answers answers/expert_33.csv --only focus
+```
+다른 답안을 보려면 `--focus-ids H-03,H-07`처럼 준다. 두 결과의 표를 나란히 놓고, 다수결 코드와 오류 줄이 그대로면 '같은 현상'으로 판단한다.
 
 ## 1-8 손글씨 OCR — 수집 필요, OCR API 비용
 
@@ -215,7 +244,7 @@ python experiments/ocr_compare.py --samples answers/ocr/ocr_samples.csv `
 
 1. 1-8 손글씨 수집 시작 (가장 오래 걸림)
 2. 1-2 라벨 4건 수정 → 재분석 (비용 0)
-3. 1-1b 재채점 (expert·holdout) → 1.2와 판정 비교
+3. 1-1b 재채점 (expert·holdout) → 1.2와 판정 비교 → 1-9 재확인 표 확인
 4. 1-4 변환 5건 작성 → 채점·비교
 5. 1-8 OCR 비교
 
@@ -227,7 +256,7 @@ python experiments/ocr_compare.py --samples answers/ocr/ocr_samples.csv `
 | --- | --- |
 | 1-1 | 도구/텍스트/없음 호출 수, 재시도·에러 비율. 1.3 결과면 첫 호출 사유(형식·검증)도 |
 | 1-2 | 첫 오류 줄 일치 (1회차 기준) + 회차별 + 답안별 표 |
-| 1-3 | 지정 답안의 회차별 판정·다수결·코드 일치 |
+| 지정 답안 확인 (1-3, 1-9) | 지정 답안의 회차별 코드·다수결·코드 일치, 1회차 오류 줄과 모델 사유 |
 | 1-5 | 세 기준의 일치율, 기권·코드누락 답안 목록 (모델 사유 포함) |
 | 1-6 | 라벨 미완 답안의 AI 판단, AI가 미완으로 본 답안, 미완인데 R3가 붙은 회차 |
 | 1-7 | 지정 코드 라벨 답안의 AI 판정과 사유, 라벨×AI 교차표 |
