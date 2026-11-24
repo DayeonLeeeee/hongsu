@@ -10,6 +10,7 @@
   - 0이면 끈다. 서버 안에서 다시 부르는 요청(/measure_consistency → /grade)은 세지 않는다.
   - gunicorn 워커 1개 기준(Procfile)의 메모리 카운터다. 워커를 늘리면 워커마다 따로 센다.
 """
+import hmac
 import threading
 import time
 from collections import defaultdict, deque
@@ -18,6 +19,7 @@ from typing import Any, Callable, Deque, Dict, Optional
 
 from flask import jsonify, request
 
+from hongsu import config
 from hongsu.config import RATE_LIMIT_IP_PER_MIN, RATE_LIMIT_PER_MIN
 
 INTERNAL_FLAG = "hongsu.internal"   # 서버 내부 호출 표시 (environ_base로만 넣을 수 있어 밖에서 꾸밀 수 없다)
@@ -60,6 +62,19 @@ def get_int(data: dict, key: str, default: int, lo: int, hi: int) -> int:
     return n
 
 
+def admin_only(fn: Callable[..., Any]) -> Callable[..., Any]:
+    """ADMIN_TOKEN이 설정돼 있으면 X-Admin-Token 헤더가 같아야 한다 (아니면 401). 비어 있으면 통과."""
+    @wraps(fn)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        token = config.ADMIN_TOKEN
+        if token and not hmac.compare_digest(request.headers.get("X-Admin-Token", ""), token):
+            resp = jsonify({"success": False, "error": "관리자 토큰이 필요함 (X-Admin-Token)"})
+            resp.status_code = 401
+            return resp
+        return fn(*args, **kwargs)
+    return wrapper
+
+
 # ─── 요청 횟수 제한 ───
 _hits: Dict[str, Deque[float]] = defaultdict(deque)
 _lock = threading.Lock()
@@ -73,6 +88,11 @@ def reset() -> None:
 
 
 def _client_ip() -> str:
+    """Railway 엣지가 덮어쓰는 X-Real-IP를 먼저 쓴다 (클라이언트가 보낸 값은 엣지에서 바뀐다).
+    X-Forwarded-For의 첫 값은 클라이언트가 꾸밀 수 있어 X-Real-IP가 없을 때만 쓴다."""
+    real = (request.headers.get("X-Real-IP") or "").strip()
+    if real:
+        return real
     fwd = request.headers.get("X-Forwarded-For", "")
     return (fwd.split(",")[0].strip() if fwd else "") or request.remote_addr or "?"
 

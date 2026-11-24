@@ -5,7 +5,7 @@ from flask.typing import ResponseReturnValue
 
 import rv2_codebook
 from hongsu import storage
-from hongsu.guard import BadInput, json_body
+from hongsu.guard import BadInput, admin_only, json_body
 from hongsu.logging_setup import log
 from hongsu.utils import now_iso
 
@@ -23,6 +23,7 @@ def list_problems() -> ResponseReturnValue:
 
 
 @bp.route("/admin/problems", methods=["POST"])
+@admin_only
 def add_problem() -> ResponseReturnValue:
     """문제 추가. 외부에서 JSON으로 문제 + 채점 가이드 입력."""
     data = json_body()
@@ -70,6 +71,7 @@ def get_problem(pid: str) -> ResponseReturnValue:
 
 
 @bp.route("/admin/problems/<pid>", methods=["PUT"])
+@admin_only
 def update_problem(pid: str) -> ResponseReturnValue:
     """문제 수정 (부분 업데이트)"""
     if pid not in storage.problems_db:
@@ -84,6 +86,7 @@ def update_problem(pid: str) -> ResponseReturnValue:
 
 
 @bp.route("/admin/problems/<pid>", methods=["DELETE"])
+@admin_only
 def delete_problem(pid: str) -> ResponseReturnValue:
     """문제 삭제"""
     if pid not in storage.problems_db:
@@ -93,6 +96,7 @@ def delete_problem(pid: str) -> ResponseReturnValue:
 
 
 @bp.route("/admin/problems/bulk", methods=["POST"])
+@admin_only
 def bulk_add_problems() -> ResponseReturnValue:
     """문제 일괄 등록 (배열로 보내기)"""
     data = json_body()
@@ -111,6 +115,7 @@ def bulk_add_problems() -> ResponseReturnValue:
 
 
 @bp.route("/admin/rv2/reload", methods=["POST"])
+@admin_only
 def rv2_reload() -> ResponseReturnValue:
     """엑셀을 다시 읽는다 (서버 재시작 없이 코드북·문항 갱신)."""
     try:

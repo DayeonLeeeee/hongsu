@@ -1,5 +1,7 @@
 # coding: utf-8
 """R v2 진단(/grade)과 반복 일관성 측정(/measure_consistency)."""
+import uuid
+
 from flask import Blueprint, current_app, jsonify
 from flask.typing import ResponseReturnValue
 
@@ -63,7 +65,9 @@ def grade_rv2_endpoint() -> ResponseReturnValue:
             return jsonify({"success": False,
                             "error": "R v2는 확인된 OCR 텍스트로 채점합니다. /ocr → (/refine) 후 solution_steps로 보내세요."}), 400
 
-        answer_id = f"A-{now_iso().replace(':','').replace('-','').replace('.','')[:15]}-{problem_id}"
+        # 시각(초 단위)만으로는 같은 문항을 같은 초에 낸 학생끼리 ID가 겹친다 → 뒤에 무작위 6자
+        answer_id = (f"A-{now_iso().replace(':','').replace('-','').replace('.','')[:15]}-{problem_id}"
+                     f"-{uuid.uuid4().hex[:6]}")
         log.info(f"[R v2 진단] {answer_id} mode={mode} status={input_status}")
 
         # 백지·판독 불가는 오류가 아니다 (판정 규칙 2) → LLM 호출 없이 기록

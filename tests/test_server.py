@@ -388,3 +388,68 @@ def test_ocr_cost_counts_gemini_tokens_and_mathpix_requests(env, monkeypatch):
     rows = {r["model"]: r for r in usage_cost.snapshot() if r["kind"] == "ocr"}
     assert rows["gemini-2.5-flash"]["requests"] == 2 and rows["gemini-2.5-flash"]["output_tokens"] == 800
     assert rows["mathpix"]["requests"] == 1 and rows["mathpix"]["cost_usd"] == pytest.approx(0.002)
+
+
+# ── 3회 점검에서 고친 것 ────────────────────────────────────
+
+
+def test_answer_ids_unique_within_same_second(env, monkeypatch):
+    """같은 문항을 같은 초에 낸 학생끼리 answer_id가 겹치지 않아야 한다 (교실 동시 제출)."""
+    from hongsu.routes import grade as grade_route
+    monkeypatch.setattr(grade_route, "now_iso", lambda: "2026-11-25T10:00:00.000001")
+    ids = {env.client.post("/grade", json={"problem_id": "INV-R-01", "solution_text": ""}).get_json()["answer_id"]
+           for _ in range(20)}
+    assert len(ids) == 20 and all(i.startswith("A-20261125T100000-INV-R-01-") for i in ids)
+
+
+def test_rate_limit_uses_x_real_ip_over_forwarded_for(env, monkeypatch):
+    """Railway 엣지가 덮어쓰는 X-Real-IP 기준. X-Forwarded-For를 바꿔 보내도 같은 IP로 센다."""
+    from hongsu import guard
+    monkeypatch.setattr(guard, "RATE_LIMIT_IP_PER_MIN", 2)
+    body = {"problem_id": "INV-R-01", "solution_text": ""}
+    codes = [env.client.post("/grade", json=body, headers={"X-Real-IP": "1.2.3.4", "X-Forwarded-For": f"9.9.9.{i}"}
+                             ).status_code for i in range(3)]
+    assert codes == [200, 200, 429]
+    assert env.client.post("/grade", json=body, headers={"X-Real-IP": "5.6.7.8"}).status_code == 200
+
+
+def test_admin_token_guards_admin_writes_when_set(env, monkeypatch):
+    from hongsu import config
+    c = env.client
+    assert c.post("/admin/problems", json={"title": "t"}).status_code == 200       # 토큰 미설정: 예전처럼 열림
+    monkeypatch.setattr(config, "ADMIN_TOKEN", "s3cret")
+    assert c.post("/admin/problems", json={"title": "t"}).status_code == 401
+    assert c.delete("/admin/problems/INV-R-01").status_code == 401
+    assert c.post("/admin/rv2/reload").status_code == 401 and c.get("/admin/usage").status_code == 401
+    assert c.post("/admin/problems/bulk", json={"problems": []}, headers={"X-Admin-Token": "wrong"}).status_code == 401
+    ok = c.post("/admin/problems", json={"title": "t"}, headers={"X-Admin-Token": "s3cret"})
+    assert ok.status_code == 200
+    c.delete(f"/admin/problems/{ok.get_json()['id']}", headers={"X-Admin-Token": "s3cret"})
+    # 학생 화면이 쓰는 읽기는 그대로 열려 있다
+    assert c.get("/admin/problems").status_code == 200 and c.get("/admin/problems/INV-R-01").status_code == 200
+
+
+def test_failed_db_saves_are_kept_and_retried_in_order(env, monkeypatch):
+    """DB가 잠깐 죽어도 채점 기록을 잃지 않는다: 보류했다가 DB가 돌아오면 순서대로 넣는다."""
+    import hongsu.db as db
+    from hongsu import storage
+    monkeypatch.setattr(db, "DATABASE_URL", "postgresql://x")
+    monkeypatch.setattr(storage, "_pending", __import__("collections").deque(maxlen=5000))
+    saved, down = [], {"v": True}
+
+    def insert(row):
+        if down["v"]:
+            raise ConnectionError("db down")
+        saved.append(row["answer_id"])
+    monkeypatch.setattr(db, "insert_rv2", insert)
+    monkeypatch.setattr(db, "check", lambda: {"ok": not down["v"], "backend": "postgres"})
+    ids = [env.client.post("/grade", json={"problem_id": "INV-R-01", "solution_text": ""}).get_json()["answer_id"]
+           for _ in range(3)]
+    assert saved == [] and storage.pending_count() == 3
+    h = env.client.get("/health?deep=1").get_json()["checks"]["db"]
+    assert h["ok"] is False and h["pending"] == 3
+    down["v"] = False
+    h = env.client.get("/health?deep=1").get_json()["checks"]["db"]   # DB 복구 → health가 밀린 행을 넣음
+    assert h["ok"] is True and h["pending"] == 0 and saved == ids
+    new = env.client.post("/grade", json={"problem_id": "INV-R-01", "solution_text": ""}).get_json()["answer_id"]
+    assert saved == ids + [new]

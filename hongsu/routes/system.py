@@ -8,7 +8,8 @@ from flask.typing import ResponseReturnValue
 import rv2_codebook
 import rv2_grader
 import usage_cost
-from hongsu import clients, db
+from hongsu import clients, db, storage
+from hongsu.guard import admin_only
 from hongsu.config import ANTHROPIC_API_KEY, BASE_DIR
 from hongsu.utils import now_iso
 from prompts import rv2 as p_rv2
@@ -34,6 +35,11 @@ def health() -> ResponseReturnValue:
     sb = None if db.enabled() else clients.get_supabase()
     if db.enabled():   # DATABASE_URL(Railway Postgres)에 저장 중
         checks["db"] = db.check()
+        if checks["db"]["ok"] and storage.pending_count():
+            storage.flush_pending()            # DB가 돌아왔으면 못 넣었던 행을 넣는다
+        checks["db"]["pending"] = storage.pending_count()
+        if checks["db"]["pending"]:
+            checks["db"]["ok"] = False         # 보류 행이 남아 있으면 정상이 아님
     elif sb is None:
         checks["supabase"] = {"ok": False, "error": "클라이언트 없음 (SUPABASE_URL/KEY 확인)"}
     else:
@@ -61,6 +67,7 @@ _STARTED = now_iso()
 
 
 @bp.route("/admin/usage", methods=["GET"])
+@admin_only
 def usage() -> ResponseReturnValue:
     """API 사용량과 비용.
     process: 서버가 켜진 뒤 누적 (채점·OCR 수정·OCR 호출, 재시작하면 0).

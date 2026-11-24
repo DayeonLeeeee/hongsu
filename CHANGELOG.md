@@ -32,6 +32,7 @@
 
 | 날짜 | 변경 |
 | --- | --- |
+| 2026-11-25 | 3회 점검 수정: `answer_id`에 무작위 6자를 붙여 같은 초에 같은 문항을 낸 학생끼리 겹치지 않게 함. 요청 횟수 제한의 IP를 Railway가 덮어쓰는 `X-Real-IP` 기준으로(클라이언트가 꾸밀 수 있는 `X-Forwarded-For` 대신). DB 저장 실패 시 기록을 버리지 않고 보류했다가 다시 넣음(`/health?deep=1`에 `pending`). `ADMIN_TOKEN`을 설정하면 관리 기능(문항 추가·수정·삭제, 엑셀 다시 읽기, 사용량)에 `X-Admin-Token` 필요 |
 | 2026-11-25 | API 사용량·비용: 채점마다 `cost_usd`(호출별 실제 응답 모델 가격, `usage_cost.py`) 기록, 로그에 토큰·비용, `/refine`(Haiku)·`/ocr`(Gemini 토큰 + Mathpix 요청당) 비용, `GET /admin/usage`(서버 누적 + DB 날짜·모델별 합계), `experiments/usage_report.py` |
 | 2026-11-25 | 입력 검증(잘못된 요청은 400과 이유, 답안·단계 수·본문 크기 상한), 요청 횟수 제한(학생별·IP별 1분당, 비용 드는 엔드포인트만), 결과에 `git_commit` 기록, requirements 버전 고정 |
 | 2026-11-25 | OCR 평문 정리 버그 수정: `\frac{x-2}{3}`이 `(x-2/3)`, `\sqrt{x+1}`이 `√x+1`로 바뀌던 것을 `((x-2)/3)`, `√(x+1)`로 (`/ocr`, `/refine` 텍스트만) |

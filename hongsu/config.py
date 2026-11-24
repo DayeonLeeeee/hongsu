@@ -36,4 +36,7 @@ MAX_STEPS = int(os.environ.get("MAX_STEPS", "60"))
 MAX_REQUEST_MB = float(os.environ.get("MAX_REQUEST_MB", "20"))      # 이미지(base64) 포함 요청 본문
 # 요청 횟수 제한 (1분당, 엔드포인트별). 0이면 끈다.
 RATE_LIMIT_PER_MIN = int(os.environ.get("RATE_LIMIT_PER_MIN", "30"))        # 학생(student_id)별
+# 관리 기능(문항 추가·수정·삭제, 엑셀 다시 읽기, 사용량)을 막는 토큰. 설정하면 요청 헤더 X-Admin-Token이 같아야 한다.
+# 비워 두면 예전처럼 열려 있다 (지금 admin.html은 토큰을 보내지 않는다).
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 RATE_LIMIT_IP_PER_MIN = int(os.environ.get("RATE_LIMIT_IP_PER_MIN", "600"))  # IP별 (교실 = 공유기 IP 하나)
