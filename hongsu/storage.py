@@ -4,13 +4,15 @@
 인메모리 DB는 서버 재시작 시 초기화된다. 채점 결과의 영구 저장은 rv2_gradings 테이블:
 DATABASE_URL이 있으면 PostgreSQL(Railway, hongsu/db.py), 없으면 Supabase.
 """
+from typing import Dict
+
 import rv2_codebook
 from hongsu import clients, db
 from hongsu.logging_setup import log
 from hongsu.utils import now_iso
 
-problems_db = {}   # id -> problem dict
-results_db = {}    # id -> 학생 결과 dict (인메모리, /results)
+problems_db: Dict[str, dict] = {}   # id -> problem dict
+results_db: Dict[str, dict] = {}    # id -> 학생 결과 dict (인메모리, /results)
 _next_id = 1
 
 

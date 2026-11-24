@@ -22,6 +22,7 @@ import json
 import os
 import sys
 import time
+from typing import Any
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -38,7 +39,7 @@ def load_answers(path: str, include_all: bool) -> list:
     return rows
 
 
-def grade_local(client, row: dict) -> dict:
+def grade_local(client: Any, row: dict) -> dict:
     import rv2_grader
     rec = rv2_grader.diagnose(client, row["problem_id"], row["학생_답안"], mode="with_codebook")
     rec["outcome"], rec["review_sources"] = rv2_grader.classify_outcome(rec)
@@ -70,7 +71,7 @@ def grade_remote(url: str, row: dict) -> dict:
     }
 
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--answers", required=True)
     ap.add_argument("--repeats", type=int, default=3)

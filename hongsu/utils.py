@@ -2,6 +2,7 @@
 """공용 도우미: 시각, 이미지 블록, Claude 응답 파싱, 평문 정리."""
 import datetime
 import re
+from typing import Any
 
 import rv2_grader
 
@@ -9,7 +10,7 @@ def now_iso() -> str:
     return datetime.datetime.now().isoformat()
 
 
-def parse_tool_use(response) -> dict:
+def parse_tool_use(response: Any) -> dict:
     """Claude 응답에서 구조화된 결과(dict)를 꺼낸다. tool_use 블록 우선, 없으면 텍스트의 JSON.
     파싱 규칙은 rv2_grader.extract_result 하나로 통일한다."""
     parsed, _source = rv2_grader.extract_result(getattr(response, "content", []))

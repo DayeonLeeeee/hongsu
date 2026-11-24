@@ -6,6 +6,7 @@
 - 저장할 때마다 새로 연결한다 (요청 수가 적고, DB 재시작·연결 끊김에 강하다).
 """
 import threading
+from typing import Any
 
 from hongsu.config import DATABASE_URL
 from hongsu.logging_setup import log
@@ -41,7 +42,7 @@ def enabled() -> bool:
     return bool(DATABASE_URL)
 
 
-def _connect():
+def _connect() -> Any:
     import psycopg
     return psycopg.connect(DATABASE_URL, connect_timeout=10)
 
@@ -61,7 +62,7 @@ def ensure_table() -> None:
         log.info("[DB] rv2_gradings 테이블 확인 완료")
 
 
-def _value(col, v):
+def _value(col: str, v: Any) -> Any:
     if v is None:
         return None
     if RV2_COLUMNS[col] == "jsonb":

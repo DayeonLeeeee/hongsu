@@ -2,7 +2,7 @@
 """
 rv2_grader.py — R v2 진단 (키트 run_eval.py의 서버 이식본)
 
-흐름: 프롬프트 조립(엑셀) → LLM 호출(tool_use 강제) → 기계 검증 → 실패 시 사유 붙여 1회 재시도
+흐름: 프롬프트 조립(엑셀) → LLM 호출(tool_use, 모델별로 강제 또는 auto) → 기계 검증 → 실패 시 사유 붙여 1회 재시도
       → 결과 + 재현성 필드 + 응답 원문 반환.
 
 README 이식 규칙 대응:
@@ -33,6 +33,7 @@ import datetime
 import json
 import os
 import re
+from typing import Any, Dict, Optional, Tuple
 
 import rv2_codebook
 from prompts import rv2 as p_rv2
@@ -40,13 +41,13 @@ from prompts import rv2 as p_rv2
 # 모델별 호출 기본값 (11/11 모델 비교 실험에서 확인한 제약).
 #   tool_choice: 도구 호출 강제를 거부하는 모델은 "auto"
 #   temperature: temperature를 받지 않는 모델은 None(전송 안 함)
-MODEL_DEFAULTS = {
+MODEL_DEFAULTS: Dict[str, dict] = {
     "claude-opus-5-5":  {"tool_choice": "auto", "temperature": None},
     "claude-haiku-5-5": {"tool_choice": "tool", "temperature": None},
     "claude-opus-4-6":  {"tool_choice": "tool", "temperature": 0.0},
     "claude-haiku-4-5": {"tool_choice": "tool", "temperature": 0.0},
 }
-_FALLBACK_DEFAULTS = {"tool_choice": "tool", "temperature": 0.0}
+_FALLBACK_DEFAULTS: dict = {"tool_choice": "tool", "temperature": 0.0}
 
 
 def model_defaults(model: str) -> dict:
@@ -86,7 +87,7 @@ def norm(s: str) -> str:
     return re.sub(r"\s+", "", s or "")
 
 
-def _to_int(v):
+def _to_int(v: Any) -> Optional[int]:
     """'5', 5, '⑤', '기준5' → 5. 해석 못 하면 None."""
     if isinstance(v, bool):
         return None
@@ -137,7 +138,7 @@ _J_LEVELS = {"J0", "J1", "J2"}
 _INPUT_STATUS = {"confirmed", "not_attempted", "unreadable"}
 
 
-def _to_bool(v):
+def _to_bool(v: Any) -> Optional[bool]:
     """True/False/'true'/'false'/1/0 → bool, 해석 못 하면 None."""
     if isinstance(v, bool):
         return v
@@ -149,7 +150,7 @@ def _to_bool(v):
     return None
 
 
-def _to_null_or_str(v, null_words=_NULL_WORDS):
+def _to_null_or_str(v: Any, null_words: set = _NULL_WORDS) -> Optional[str]:
     """None·'null'·'' 같은 빈 값 → None, 그 외 → 문자열."""
     if v is None:
         return None
@@ -157,7 +158,7 @@ def _to_null_or_str(v, null_words=_NULL_WORDS):
     return None if s.strip().lower() in null_words else s
 
 
-def _maybe_json(v):
+def _maybe_json(v: Any) -> Any:
     """문자열로 온 JSON 객체·배열을 푼다. 못 풀면 원래 값."""
     if isinstance(v, str):
         s = v.strip()
@@ -199,7 +200,7 @@ def _clean_line(ln: dict, pos: int, issues: list) -> dict:
     return out
 
 
-def sanitize(parsed, mode: str = "with_codebook"):
+def sanitize(parsed: Any, mode: str = "with_codebook") -> Tuple[Optional[dict], list]:
     """LLM 응답 정제 (단일 진입점).
 
     반환: (정제된 dict, issues 리스트)
@@ -267,7 +268,7 @@ def sanitize(parsed, mode: str = "with_codebook"):
     return out, issues
 
 
-def extract_result(content_blocks):
+def extract_result(content_blocks: list) -> Tuple[Optional[dict], str]:
     """응답 블록에서 결과 dict와 출처를 꺼낸다.
     tool_use 블록 우선 → 없으면 텍스트 블록의 JSON(```json 펜스 포함) → 둘 다 없으면 (None, 'none')."""
     texts = []
@@ -296,7 +297,7 @@ def extract_result(content_blocks):
 
 
 def validate(parsed: dict, answer_text: str, allowed: list, with_codes: bool,
-             criteria_nos: list = None) -> list:
+             criteria_nos: Optional[list] = None) -> list:
     """키트 run_eval.validate()와 동일한 기계 검증 + missing_criteria 번호 검사.
     실패 사유 목록 (빈 리스트면 통과)."""
     issues = []
@@ -336,7 +337,7 @@ def steps_to_answer_text(steps: list) -> str:
     return "\n".join(out)
 
 
-def _dump_content(resp) -> list:
+def _dump_content(resp: Any) -> list:
     """응답 원문 보존 (블록 단위). SDK 객체 → dict."""
     out = []
     for b in getattr(resp, "content", []) or []:
@@ -347,7 +348,8 @@ def _dump_content(resp) -> list:
     return out
 
 
-def _call(client, model, system, user, tool, max_tokens, temperature, tool_choice=None):
+def _call(client: Any, model: str, system: str, user: str, tool: dict, max_tokens: int,
+          temperature: Optional[float], tool_choice: Optional[str] = None) -> Tuple[Optional[dict], dict]:
     tool_choice = tool_choice or RV2_TOOL_CHOICE
     kw = dict(model=model, max_tokens=max_tokens, system=system,
               tools=[tool], messages=[{"role": "user", "content": user}])
@@ -366,9 +368,9 @@ def _call(client, model, system, user, tool, max_tokens, temperature, tool_choic
     return parsed, raw
 
 
-def diagnose(client, problem_id: str, answer_text: str, mode: str = "with_codebook",
-             model: str = None, max_tokens: int = None, temperature="default",
-             tool_choice: str = None) -> dict:
+def diagnose(client: Any, problem_id: str, answer_text: str, mode: str = "with_codebook",
+             model: Optional[str] = None, max_tokens: Optional[int] = None,
+             temperature: Any = "default", tool_choice: Optional[str] = None) -> dict:
     """R v2 진단 1건. 예외를 던지지 않고 항상 결과 dict를 돌려준다 (실패도 원문과 함께 기록)."""
     assert mode in ("grade_only", "with_codebook")
     model = model or RV2_MODEL
@@ -401,7 +403,7 @@ def diagnose(client, problem_id: str, answer_text: str, mode: str = "with_codebo
         "first_issues": [],        # 첫 호출의 정제·검증 사유 (재시도로 해결됐어도 기록 — 안정성 측정용)
     }
 
-    def _one(u):
+    def _one(u: str) -> Tuple[Optional[dict], Optional[str]]:
         parsed, raw = _call(client, model, built["system"], u, tool, max_tokens, temperature,
                             tool_choice=tool_choice)
         rec["raw_responses"].append(raw)
@@ -413,7 +415,7 @@ def diagnose(client, problem_id: str, answer_text: str, mode: str = "with_codebo
             rec["usage"][k] += raw["usage"].get(k, 0)
         return parsed, raw["stop_reason"]
 
-    def _check(parsed, stop_reason):
+    def _check(parsed: Optional[dict], stop_reason: Optional[str]) -> Tuple[Optional[dict], list]:
         """정제 + 검증. 결과 블록이 없으면 (None, [사유])."""
         if parsed is None:
             return None, [f"결과 블록 없음 (stop_reason={stop_reason}) — 지정된 도구 형식(JSON)으로 출력할 것"]
@@ -442,7 +444,7 @@ def diagnose(client, problem_id: str, answer_text: str, mode: str = "with_codebo
     return rec
 
 
-def classify_outcome(rec: dict):
+def classify_outcome(rec: dict) -> Tuple[str, list]:
     """진단 기록 → (outcome, review_sources).
 
     outcome (우선순위 순):
