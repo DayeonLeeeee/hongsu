@@ -210,7 +210,8 @@ def test_grade_incomplete_answer(env):
     env.claude.result = res
     j = env.client.post("/grade", json={"problem_id": "INV-R-01", "solution_text": ANSWER}).get_json()
     assert j["outcome"] == "incomplete" and j["missing_criteria"] == [5]
-    assert j["completion_status"] == "incomplete" and j["is_correct"] is None   # 미완은 정답·오답으로 나누지 않음
+    # 미완 여부와 정답 여부는 따로 둔다: is_correct는 모델의 정오 판정 그대로
+    assert j["completion_status"] == "incomplete" and j["is_correct"] is res["math_result_correct"]
 
 
 def test_grade_api_failure_still_answers_with_error(env, monkeypatch):

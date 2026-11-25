@@ -131,8 +131,7 @@ def grade_rv2_endpoint() -> ResponseReturnValue:
             "extraction": rec.get("extraction", []),        # 호출별 결과 출처 tool/text/none (스키마 안정성 측정)
             "first_issues": rec.get("first_issues", []),    # 첫 호출 정제·검증 사유 (재시도로 해결돼도 기록)
             # ── 기존 프론트 호환 ──
-            # 미완 답안은 정답·오답으로 나누지 않는다 (계획 문서 라벨·데이터 작업 2번)
-            "is_correct": None if res.get("response_complete") is False else res.get("math_result_correct"),
+            "is_correct": res.get("math_result_correct"),
             "steps": rv2_grader.to_server_steps(res),
             "reveal_answer": (res.get("math_result_correct") is False) and attempt_count >= MAX_ATTEMPTS_BEFORE_REVEAL,
             "feedback": {"feedback": "", "detailed_feedback": "", "next_focus": []},  # 피드백은 다음 단계

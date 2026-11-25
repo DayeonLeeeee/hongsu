@@ -23,7 +23,7 @@
 
 | 버전 | 날짜 | 변경 |
 | --- | --- | --- |
-| rv2-grader-1.4 | 2026-11-25 | 검증 규칙 1개 추가: 미완 답안(response_complete=false)에 주 코드 R3가 붙으면 사유를 붙여 재시도하고, 그래도 남으면 검수로 보낸다(계획 문서 라벨·데이터 작업 2번). 1.3 결과 269회 중 해당 사례 0건이라 지금까지 결과에는 영향이 없다. `/grade` 응답에 `completion_status` 추가, 미완이면 `is_correct`는 null |
+| rv2-grader-1.4 | 2026-11-25 | 검증 규칙 1개 추가: 미완 답안(response_complete=false)에 주 코드 R3가 붙으면 사유를 붙여 재시도하고, 그래도 남으면 검수로 보낸다(계획 문서 라벨·데이터 작업 2번). 1.3 결과 269회 중 해당 사례 0건이라 지금까지 결과에는 영향이 없다. `/grade` 응답에 `completion_status` 추가 (2026-11-26: 미완이면 `is_correct`를 비우던 처리는 되돌림. `is_correct`는 모델 정오 판정 그대로, 미완 여부와 따로 둔다) |
 | rv2-grader-1.3 | 2026-11-24 | 응답 정제를 `sanitize()` 하나로 통합(고칠 수 있는 형식은 고치고, 못 고치는 것은 사유를 남겨 1회 재시도·검수). tool_use 블록이 없으면 텍스트의 JSON을 읽음(`extract_result`). 결과 블록이 없어도 1회 재시도. 모델별 호출 기본값(Opus 5.5: 도구 auto, temperature 없음). 기본 모델 Opus 5.5. `outcome`(graded/review/incomplete/not_attempted/unreadable/error)과 `review_sources` 분류. 기록 추가: `extraction`, `first_issues`, `response_models`, `tool_choice`, `git_commit` |
 | (1.2 이전) | 2026-10 | 키트 `run_eval.validate()` 이식: 인용문 원문 대조, 허용 밖 코드 거부, 실패 사유를 붙여 1회 재시도, `missing_criteria` 번호 검사 |
 
