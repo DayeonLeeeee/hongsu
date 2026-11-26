@@ -38,7 +38,7 @@ import re
 
 CODEBOOK_VERSION = "R-v2"             # 엑셀에 버전이 없을 때만 쓰는 기본값 (실제 값은 mats["codebook_version"])
 BUILDER_VERSION = "kit-1.2-20261022"  # v1.2: 33건 개발셋 교정 패치 (J 6규칙, C-1~C-5)
-PORT_VERSION = "hongsu-rv2-1.2"       # hongsu 이식본 버전 (1.2: R-v3 규칙 11·12 대응)
+PORT_VERSION = "hongsu-rv2-1.8"       # hongsu 이식본 버전 (1.2: R-v3 규칙 11·12 대응, 1.3: 출력 형식 규칙 추가 — 판정 기준 변경 없음, 1.4: 줄별 어긴 기준 칸(11/11 합의 2), 1.5: stopped_midway 칸(합의 3), 1.6: 1.3 + 어긴 기준 칸을 코드북 v3.1 이름 violated_criterion으로 — stopped_midway 뺌, 1.7: R-v3.1 자료(dataset_rv31.xlsx)를 읽을 수 있게 — 코드 주의 항목, 미완 처리 참조 이름. dataset_rv2.xlsx로 만든 프롬프트는 1.6과 같음, 1.8: 교수님 11/26 — 판정 절차 4번 '누락이 오류이면 main_error_code' 문장과 main_error_code 설명의 누락 기준 괄호 삭제, code_candidates 칸 추가)
 
 # v1.2 패치 — 33건 개발셋(전문가 라벨)으로 교정된 추가 판정 규칙.
 # 주의: 사후 적합된 규칙이므로 홀드아웃(신규 합성답안)에서 검증 전까지는 잠정.
@@ -103,6 +103,7 @@ def _codebook_block(mats: dict, codes: list) -> str:
             f"- 포함: {r['include']}\n"
             f"- 제외: {r['exclude']}\n"
             f"- 예시: {r['example']}"
+            + (f"\n- 주의: {r['caution']}" if r.get("caution") else "")   # R-v3.1: R2·R9·R11 주의
         )
     return "\n\n".join(out)
 
@@ -127,6 +128,14 @@ def _criteria_block(mats: dict, problem_id: str, with_codes: bool) -> str:
     return "\n".join(out)
 
 
+def _incomplete_rule_ref(mats: dict) -> str:
+    """판정 절차 4번이 가리키는 미완 처리 규칙의 이름.
+    R-v3 자료와 지금의 R-v3.1 자료(11/26 답변 반영)에서는 판정 규칙 12.
+    1.7 때의 v3.1 사본처럼 미완 처리가 '답안 상태'로 개명된 자료면 그 이름을 쓴다."""
+    nums = {str(r.get("번호")) for r in mats.get("prompt_rules", [])}
+    return "판정 규칙 '답안 상태'" if "답안 상태" in nums else "판정 규칙 12"
+
+
 def _rules_block(mats: dict, with_codes: bool) -> str:
     skip_for_grade_only = {"5", "9", "10"}  # 코드 선택·오탐검사·피드백 관련 규칙은 3단계부터
     out = []
@@ -139,7 +148,8 @@ def _rules_block(mats: dict, with_codes: bool) -> str:
 
 SCHEMA_GRADE_ONLY = """{
  "lines": [{"no": 1, "student_text": "...", "matched_criterion": 2 또는 null,
-            "judgment": "ok|wrong|depends", "quote": "wrong이면 원문 인용, 아니면 null",
+            "judgment": "ok|wrong|depends", "violated_criterion": "wrong이면 이 줄의 오류가 어긴 기준 번호, 아니면 null",
+            "quote": "wrong이면 원문 인용, 아니면 null",
             "reason": "wrong이면 무엇이 왜 틀렸는지 한 문장", "depends_on": 원인 줄 번호 또는 null}],
  "math_result_correct": true,
  "input_status": "confirmed|not_attempted|unreadable",
@@ -148,27 +158,51 @@ SCHEMA_GRADE_ONLY = """{
 
 SCHEMA_WITH_CODEBOOK = """{
  "lines": [{"no": 1, "student_text": "...", "matched_criterion": 2 또는 null,
-            "judgment": "ok|wrong|depends", "code": "R코드 또는 null",
+            "judgment": "ok|wrong|depends", "violated_criterion": "wrong이면 이 줄의 오류가 어긴 기준 번호, 아니면 null",
+            "code": "R코드 또는 null",
             "quote": "wrong이면 원문 인용, 아니면 null",
             "reason": "판정 근거 한 문장", "depends_on": 원인 줄 번호 또는 null}],
- "main_error_code": "첫 독립 wrong 줄(wrong 줄이 없으면 오류인 누락 기준)의 R코드, 없으면 null",
+ "main_error_code": "첫 독립 wrong 줄의 R코드, 없으면 null",
  "justification_level": "J0|J1|J2|not_applicable",
  "math_result_correct": true,
  "input_status": "confirmed|not_attempted|unreadable",
  "review_needed": false,
  "review_reason": "",
  "response_complete": true 또는 false (문항의 요구 항목을 모두 썼으면 true),
- "missing_criteria": [대응하는 학생 풀이가 없는 기준 번호들, 없으면 []]
+ "missing_criteria": [대응하는 학생 풀이가 없는 기준 번호들, 없으면 []],
+ "code_candidates": [{"code": "R코드", "reason": "근거 한 문장"}] (main_error_code 줄에 함께 성립한 다른 코드 후보, 없으면 [])
 }"""
 
 
 TOOL_NAME = "rv2_diagnose"
+
+# 1.3 — 출력 형식 규칙. 판정 기준·코드북 내용은 건드리지 않고, 응답이 파싱 가능한 형태로 오도록만 한다.
+# (문자열로 된 줄, "true"/"null" 같은 문자열 값, 도구 미사용 응답 대응)
+#
+# [보류 — 1.3에서 제외한 규칙] 줄 나누는 방식, 즉 줄별 판정 내용에 영향을 줄 수 있어 넣지 않았다.
+# 되돌리려면 아래 줄을 FORMAT_RULES의 "- lines의 각 원소는 …" 바로 다음 줄에 그대로 넣고 PORT_VERSION을 올린다.
+# 변경 이력을 정리할 때 반드시 함께 보고할 것.
+# - 학생 답안의 줄 하나 = lines 원소 하나.
+# - (같은 이유로 제외) 여러 줄을 한 원소에 합치지 않는다.  ← "lines의 각 원소는 …" 규칙 끝에 붙어 있던 문장
+FORMAT_RULES = """<출력 형식 규칙>
+- lines의 각 원소는 반드시 위 구조의 객체다. 줄을 문자열로 요약해 넣지 않는다.
+- true/false는 따옴표 없는 불리언으로 쓴다 ("true" 같은 문자열 금지).
+- 필드에 값이 없으면 null을 쓴다 ("null" 같은 문자열 금지). 학생 답안을 인용할 때는 학생이 쓴 글자 그대로 쓴다.
+- judgment는 ok, wrong, depends 중 하나를 소문자로 쓴다.
+- 번호 필드(no, matched_criterion, violated_criterion, depends_on, missing_criteria의 원소)는 정수로 쓴다 (①, "3" 금지).
+- 도구를 호출할 수 없는 경우에만, 위 구조의 JSON 객체 하나를 ```json 블록으로 출력하고 그 밖에는 아무것도 쓰지 않는다.
+</출력 형식 규칙>"""
 
 _LINE_PROPS = {
     "no": {"type": "integer", "description": "줄 번호 (학생 번호 매김/줄바꿈 순서, 1부터)"},
     "student_text": {"type": "string"},
     "matched_criterion": {"type": ["integer", "null"], "description": "대응되는 기준 번호, 없으면 null"},
     "judgment": {"type": "string", "enum": ["ok", "wrong", "depends"]},
+    # 1.4 — 11/11 회의 합의 2: '이 줄이 어느 기준에 해당하나'(matched_criterion)와
+    # '어디서 틀렸나'를 한 칸에 섞지 않도록 칸을 나눈다.
+    # 1.6 — 이름을 코드북 R v3.1 기록 표에 맞춤: line_results[].violated_criterion = 어긴 기준.
+    #       (코드북의 error_criterion = '이 줄이 어느 기준에 해당하는가' = 여기의 matched_criterion)
+    "violated_criterion": {"type": ["integer", "null"], "description": "wrong이면 이 줄의 오류가 어긴 기준 번호, 아니면 null"},
     "quote": {"type": ["string", "null"], "description": "wrong이면 학생 답안 원문 인용, 아니면 null"},
     "reason": {"type": ["string", "null"]},
     "depends_on": {"type": ["integer", "null"], "description": "depends면 원인 줄 번호"},
@@ -186,7 +220,7 @@ def tool_schema(mode: str) -> dict:
     if mode == "with_codebook":
         line_props["code"] = {"type": ["string", "null"], "description": "R코드 또는 null"}
         props.update({
-            "main_error_code": {"type": ["string", "null"], "description": "첫 독립 wrong 줄(wrong 줄이 없으면 오류인 누락 기준)의 R코드, 없으면 null"},
+            "main_error_code": {"type": ["string", "null"], "description": "첫 독립 wrong 줄의 R코드, 없으면 null"},
             "justification_level": {"type": "string", "enum": ["J0", "J1", "J2", "not_applicable"]},
             "review_needed": {"type": "boolean"},
             "review_reason": {"type": "string"},
@@ -194,9 +228,15 @@ def tool_schema(mode: str) -> dict:
                                   "description": "문항의 요구 항목을 모두 썼으면 true, 중단·누락이 있으면 false"},
             "missing_criteria": {"type": "array", "items": {"type": "integer"},
                                  "description": "대응하는 학생 풀이가 없는 기준 번호 (코드 아님, 피드백용). 없으면 []"},
+            # 1.8 — 오세준 교수님 11/26: 코드북 기록 표의 복수 후보 칸(C-5 '나머지는 code_candidates에 병기')
+            "code_candidates": {"type": "array",
+                                "items": {"type": "object",
+                                          "properties": {"code": {"type": "string"}, "reason": {"type": "string"}},
+                                          "required": ["code"]},
+                                "description": "main_error_code 줄에 함께 성립한 다른 코드 후보와 근거, 없으면 []"},
         })
         required += ["main_error_code", "justification_level", "review_needed",
-                     "response_complete", "missing_criteria"]
+                     "response_complete", "missing_criteria", "code_candidates"]
     else:
         props["notes"] = {"type": "string"}
     props["lines"] = {"type": "array", "items": {"type": "object", "properties": line_props,
@@ -245,10 +285,11 @@ def build_prompt(mats: dict, problem_id: str, mode: str = "with_codebook") -> di
         steps += [
             "3) wrong 줄에는 원문 인용과 함께 코드 부여."
             " 기준 판정표로 설명되지 않는 오류는 코드를 억지로 고르지 말고 review_needed=true",
+            # 1.8 — 오세준 교수님 11/26: "그 누락이 … 오류이면 그 코드를 main_error_code에 적고" 삭제
+            #        (누락은 인용할 원문이 없어 evidence_quote 조건을 못 맞춤 → missing_criteria로만)
             "4) 학생 풀이가 대응하지 않는 기준은 wrong 줄로 만들지 말고 missing_criteria에 기준 번호를 적는다"
-            " (인용할 원문이 없으므로). 그 누락이 기준 판정표의 'wrong일 때'에 해당하는 오류이면"
-            " 그 코드를 main_error_code에 적고, 그렇지 않은 누락·중단은 코드 없이"
-            " response_complete=false로만 기록한다 (판정 규칙 12)",
+            " (인용할 원문이 없으므로). 누락·중단은 코드 없이"
+            f" response_complete=false로만 기록한다 ({_incomplete_rule_ref(mats)})",
             "5) 풀이 전체의 근거 수준(J) 판정",
         ]
         schema = SCHEMA_WITH_CODEBOOK
@@ -257,6 +298,7 @@ def build_prompt(mats: dict, problem_id: str, mode: str = "with_codebook") -> di
         schema = SCHEMA_GRADE_ONLY
     parts.append("판정 절차:\n" + "\n".join(steps))
     parts.append(f"반드시 {TOOL_NAME} 도구로만 응답하세요. 필드 구조:\n" + schema)
+    parts.append(FORMAT_RULES)
     parts.append("<학생 답안>\n{STUDENT_ANSWER}\n</학생 답안>")
 
     return {
