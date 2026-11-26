@@ -73,9 +73,48 @@ def grade_remote(url: str, row: dict) -> dict:
     }
 
 
+def retry_errors(args, rows, client) -> str:
+    """결과 파일에서 result가 없는 행만 다시 채점한다. 원래 파일은 그대로 두고,
+    다시 채점한 행을 바꿔 넣은 전체를 <원래 이름>_retry.jsonl로 쓴다 (행 순서·회차 번호 유지).
+    다시 채점한 행에는 retried_from_error(원래 오류 문구)를 남긴다."""
+    src = args.retry_errors
+    with open(src, encoding="utf-8") as f:
+        recs = [json.loads(l) for l in f if l.strip()]
+    by_id = {r["answer_id"]: r for r in rows}
+    todo = [i for i, r in enumerate(recs) if not r.get("result")]
+    print(f"{os.path.basename(src)}: 결과 없는 행 {len(todo)}개 다시 채점")
+    for i in todo:
+        old = recs[i]
+        row = by_id.get(old["answer_id"])
+        if row is None:
+            print(f"  {old['answer_id']}: 답안 CSV에 없음 — 건너뜀")
+            continue
+        try:
+            rec = grade_remote(args.url, row) if args.url else grade_local(client, row)
+        except Exception as e:
+            rec = {"result": None, "error": f"{type(e).__name__}: {e}"}
+        rec.update({"answer_id": old["answer_id"], "problem_id": old.get("problem_id"), "repeat": old.get("repeat"),
+                    "retried_from_error": (old.get("error") or "결과 없음")[:200]})
+        recs[i] = rec
+        res = rec.get("result") or {}
+        print(f"  [{rec['repeat']}회차] {rec['answer_id']}: "
+              + (f"ERR {rec['error'][:60]}" if rec.get("error") else f"main={res.get('main_error_code')}"))
+        time.sleep(0.3)
+    base, ext = os.path.splitext(src)
+    out_path = base + "_retry" + ext
+    with open(out_path, "w", encoding="utf-8") as out:
+        for r in recs:
+            out.write(json.dumps(r, ensure_ascii=False) + "\n")
+    left = sum(1 for r in recs if not r.get("result"))
+    print(f"완료 → {out_path} (아직 결과 없는 행 {left}개)")
+    return out_path
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--answers", required=True)
+    ap.add_argument("--retry-errors", default="",
+                    help="이 결과 파일에서 결과가 없는 행(API 오류 등)만 같은 회차 번호로 다시 채점해 새 파일(_retry)로 저장")
     ap.add_argument("--repeats", type=int, default=3)
     ap.add_argument("--url", default="", help="배포 서버 주소. 비우면 로컬 실행")
     ap.add_argument("--include-all", action="store_true", help="holdout의 '1차심사 미달'까지 채점")
@@ -97,6 +136,9 @@ def main() -> None:
         model, cbv = "server", "server"
 
     os.makedirs(args.out_dir, exist_ok=True)
+    if args.retry_errors:
+        retry_errors(args, rows, client)
+        return
     stem = os.path.splitext(os.path.basename(args.answers))[0]
     ts = datetime.datetime.now().strftime("%Y%m%d_%H%M")
     out_path = os.path.join(args.out_dir, f"stage3_{stem}_{model}_{cbv}_{ts}.jsonl")

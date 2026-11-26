@@ -376,3 +376,21 @@ def test_first_error_two_columns_merge_and_score(tmp_path):
     assert "학생줄 일치: 1/1" in out and "오류기준 일치: 1/1" in out
     old = "\n".join(S._exp_1_2b({"A1": [(1, rec(None))]}, labels))   # 1.4 이전 결과: 오류기준 비교에서 뺌
     assert "오류기준 일치: 0/0" in old and "| - |" in old
+
+
+def test_run_batch_retry_errors_keeps_rows_and_repeat(tmp_path, monkeypatch):
+    """--retry-errors: 결과 없는 행만 같은 회차로 다시 채점, 원래 파일은 그대로, _retry 파일에 표시."""
+    import argparse
+    import run_batch
+    src = tmp_path / "stage3_x.jsonl"
+    rows = [{"answer_id": "H-01", "problem_id": "P", "repeat": 1, "result": {"main_error_code": None}},
+            {"answer_id": "H-01", "problem_id": "P", "repeat": 3, "result": None, "error": "BadRequestError: credit"}]
+    src.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+    monkeypatch.setattr(run_batch, "grade_local", lambda client, row: {"result": {"main_error_code": "R1"}})
+    monkeypatch.setattr(run_batch.time, "sleep", lambda s: None)
+    out = run_batch.retry_errors(argparse.Namespace(retry_errors=str(src), url=""),
+                                 [{"answer_id": "H-01", "problem_id": "P", "학생_답안": "x"}], None)
+    new = [json.loads(l) for l in open(out, encoding="utf-8")]
+    assert [r["repeat"] for r in new] == [1, 3] and new[0] == rows[0]
+    assert new[1]["result"]["main_error_code"] == "R1" and "credit" in new[1]["retried_from_error"]
+    assert json.loads(src.read_text(encoding="utf-8").splitlines()[1])["result"] is None   # 원래 파일 그대로
