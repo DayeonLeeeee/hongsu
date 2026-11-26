@@ -86,12 +86,16 @@ VERSION_NOTES = {
                       "1.4·1.5의 error_criterion과 같은 뜻(이름만 바꿈). stopped_midway 칸은 없음. 판정 절차·규칙·코드북·기준표는 1.3과 같음",
     "hongsu-rv2-1.7": "1.6 + R-v3.1 자료를 읽을 수 있게 함(코드 '주의' 항목 출력, 판정 절차 4번이 가리키는 미완 처리 규칙 이름). "
                       "dataset_rv2.xlsx(R-v3)로 만든 프롬프트는 1.6과 같음",
-    "R-v3.1": "자료 dataset_rv31.xlsx — 코드북 R v3.1(2026-11-26 오세준 교수님): 판정 규칙 12(주 코드 선정) 신설·11 단서, "
-              "R2·R5·R6·R9·R10·R11 문구, 문항 2·7 기준표, R4 1차 보류. 미완 처리 문구와 프롬프트의 C-1·판정 절차 4번 문장은 그대로(교수님 답 대기). "
-              "바뀐 칸은 엑셀 CHANGES_v3.1 시트",
+    "hongsu-rv2-1.8": "1.7 + 오세준 교수님 11/26 답변: 판정 절차 4번의 '누락이 오류이면 그 코드를 main_error_code에' 문장과 "
+                      "main_error_code 설명의 '(wrong 줄이 없으면 오류인 누락 기준)' 삭제(누락은 missing_criteria로만), code_candidates 칸 추가. "
+                      "C-1은 그대로",
+    "R-v3.1": "자료 dataset_rv31.xlsx — 코드북 R v3.1(2026-11-26 오세준 교수님): 주 코드 선정 규칙 신설·11 단서, "
+              "R2·R5·R6·R9·R10·R11 문구, 문항 2·7 기준표, R4 1차 보류. 규칙 번호: 1.8부터는 교수님 11/26 답변대로 12 = 미완 처리(Rv3 그대로), "
+              "13 = 주 코드 선정 (1.7 때 사본은 12 = 주 코드 선정, 미완 처리 = '답안 상태'). 바뀐 칸은 엑셀 CHANGES_v3.1 시트",
     "rv2-grader-1.5": "error_criterion 정수 정리",
     "rv2-grader-1.6": "1.5 + stopped_midway 불리언 정리. 검증 규칙·결과 분류(미완 회차 등)는 1.4와 같음(response_complete 기준)",
     "rv2-grader-1.7": "1.6 + violated_criterion 정수 정리. 검증 규칙·결과 분류는 1.4와 같음",
+    "rv2-grader-1.8": "1.7 + code_candidates 형식 정리. 검증 규칙·결과 분류는 1.4와 같음",
 }
 
 FIRST_LINE_COL = "전문가_첫오류_학생줄"   # prepare_answers와 같은 이름

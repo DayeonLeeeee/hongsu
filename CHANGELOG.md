@@ -10,6 +10,7 @@
 
 | 버전 | 날짜 | 변경 | 판정 기준 변경 |
 | --- | --- | --- | --- |
+| hongsu-rv2-1.8 | 2026-11-26 | 오세준 교수님 11/26 답변(미완 기준) 확인 1)·2): 판정 절차 4번에서 "그 누락이 기준 판정표의 'wrong일 때'에 해당하는 오류이면 그 코드를 main_error_code에 적고" 삭제(누락·중단은 missing_criteria와 response_complete=false로만), `main_error_code` 설명에서 "(wrong 줄이 없으면 오류인 누락 기준)" 삭제, 출력에 `code_candidates`([{code, reason}], main_error_code 줄에 함께 성립한 다른 후보, 없으면 []) 추가. C-1은 그대로 | 있음 (누락 기준에 코드 안 붙임) |
 | hongsu-rv2-1.7 | 2026-11-26 | 코드북 R v3.1 자료(`materials/dataset_rv31.xlsx`)를 읽을 수 있게 함: 코드 정의에 '주의' 줄(`caution` 열이 있을 때만), 판정 절차 4의 미완 처리 규칙 참조를 자료의 규칙 번호에 맞춤(v3.1이면 '판정 규칙 답안 상태', 아니면 '판정 규칙 12'). R-v2/R-v3 자료(`dataset_rv2.xlsx`)로 만들면 1.6과 글자 하나 다르지 않음. 판정 절차 C-1과 4번 '누락이 오류이면…' 문장은 교수님 답 기다리며 그대로(v3.1 규칙 12와 충돌할 수 있음) | 자료를 v3.1로 바꾸면 있음 |
 | hongsu-rv2-1.6 | 2026-11-26 | 1.3 + 줄마다 `violated_criterion`(wrong이면 그 줄의 오류가 어긴 기준 번호, 아니면 null). 1.4·1.5의 `error_criterion`과 같은 칸인데, 이름을 코드북 R v3.1 기록 표(`line_results[].violated_criterion`)에 맞춤. 코드북의 `error_criterion`(이 줄이 어느 기준에 해당하는가)은 여기의 `matched_criterion`. `stopped_midway` 칸은 넣지 않음(1.5에만 있음) | 없음 (출력 칸 추가) |
 | hongsu-rv2-1.5 | 2026-11-26 | 답안 전체에 `stopped_midway`(학생이 끝까지 쓰지 않고 중간에 멈춰 최종 답을 내지 않았으면 true, 끝까지 쓰고 답을 냈으면 요구 항목이 빠졌거나 틀렸어도 false) 칸 추가. 11/11 회의 합의 3(정오답은 끝까지 썼는지로 나누고 중간에 멈춘 답안은 미완). `response_complete`(요구 항목 누락)는 그대로 | 없음 (출력 칸 추가) |
@@ -27,12 +28,13 @@
 
 | 자료 | 날짜 | 변경 |
 | --- | --- | --- |
-| dataset_rv31.xlsx (R-v3.1) | 2026-11-26 | `experiments/build_dataset_v31.py`가 키트 `dataset_rv2.xlsx`(R-v3, 원본은 그대로)를 복사해 오세준 교수님 「오류 코드북 R v3.1」(2026-11-26)을 반영. 바꾼 칸은 전부 시트 `CHANGES_v3.1`에 기록. 코드 표(R2·R5·R6·R9·R10·R11 정의·포함·제외·주의, R4는 1차 보류 표시), 판정 규칙 11 단서·규칙 12 신설(옛 12는 '답안 상태'로 개명), 문항 2 ④·문항 7 ③④ 기준표, 문항 7 주 코드 R2. 미완 문구·문항 1 수치는 반영 안 함 |
+| dataset_rv31.xlsx (R-v3.1) | 2026-11-26 | `experiments/build_dataset_v31.py`가 키트 `dataset_rv2.xlsx`(R-v3, 원본은 그대로)를 복사해 오세준 교수님 「오류 코드북 R v3.1」(2026-11-26)을 반영. 바꾼 칸은 전부 시트 `CHANGES_v3.1`에 기록. 코드 표(R2·R5·R6·R9·R10·R11 정의·포함·제외·주의, R4는 1차 보류 표시), 판정 규칙 11 단서·규칙 12 신설(옛 12는 '답안 상태'로 개명), 문항 2 ④·문항 7 ③④ 기준표, 문항 7 주 코드 R2. 문항 1 수치는 반영 안 함(2차 적용부터). 같은 날 교수님 답변(미완 기준)으로 규칙 번호 수정: 12 = Rv3 미완 처리 그대로, 주 코드 선정 = 13(교수님 v3.2 예정), 규칙 11 단서와 R5 제외 문구의 참조도 13으로 |
 
 ## rv2_grader.py — 응답 정제·검증·재시도 (`GRADER_VERSION`)
 
 | 버전 | 날짜 | 변경 |
 | --- | --- | --- |
+| rv2-grader-1.8 | 2026-11-26 | `code_candidates` 형식 정리(문자열·JSON 문자열도 [{code}]로, 코드는 대문자). 검증 규칙은 그대로 |
 | rv2-grader-1.7 | 2026-11-26 | `violated_criterion`을 정수로 정리(1.4·1.5 결과의 `error_criterion`도 계속 정리). 검증 규칙은 그대로 |
 | rv2-grader-1.6 | 2026-11-26 | `stopped_midway`를 불리언으로 정리(빠지면 null, 추정하지 않음). 검증 규칙은 그대로(미완 R3 재시도 규칙은 계속 `response_complete` 기준). 키트 방식 결과 분류(`outcome`의 incomplete, 실험의 미완 회차)도 그대로 `response_complete` 기준 |
 | rv2-grader-1.5 | 2026-11-26 | `error_criterion`을 `matched_criterion`과 같은 방식으로 정수 정리(①, "3" → 정수). 검증 규칙은 추가하지 않음 |

@@ -9,14 +9,13 @@
 - 바꾸는 것은 코드북 v3.1 문서에 적힌 것만이다:
     02_R_CODEBOOK   R1~R11(R4 제외) 이름·정의·포함·제외·예시·근거를 v3.1 표 문구로, 주의(caution) 열 추가
                     R4는 1차 적용 보류(v3.1 2.) — 이름에 '(1차 보류)'
-    09_PROMPT_RULES 판정 규칙 번호를 v3.1 7.에 맞춤: 11에 단서, 12 = 주 코드 선정(신설).
-                    Rv3의 12(미완 처리)는 v3.1에서 '답안 상태' 절로 옮겨졌으므로 번호를 '답안 상태'로 (문구는 그대로)
+    09_PROMPT_RULES 11에 단서, 주 코드 선정 규칙 신설. 번호는 교수님 11/26 답변(미완 기준)대로:
+                    12 = Rv3 미완 처리 그대로, 주 코드 선정 = 13 (v3.1 문서에서 12로 쓴 것을 13으로 — 교수님 v3.2 예정)
     06_LINE_JUDGMENT 붙임 1: 문항 2 기준 ④, 문항 7 기준 ③·④
     01_PROBLEMS     문항 7 주_R코드에서 R4 제외 (R4 보류)
     04_SYNTHETIC_ANSWERS 붙임 1: 문항 3 대표 오답 B(A-03-B) 비고에 단서 (프롬프트에는 들어가지 않음)
-    00_README       코드북 버전 R-v3.1
-- 아직 반영하지 않은 것: 문항 1 수치 교체(2차 적용부터), 미완 처리 문구(교수님 답 대기),
-  프롬프트 코드의 C-1·판정 절차 4번 문장(교수님 답 대기).
+    00_README       코드북 버전 R-v3.1 (+11/26 답변의 규칙 번호)
+- 반영하지 않은 것: 문항 1 수치 교체(교수님: 2차 적용부터).
 """
 import os
 import shutil
@@ -27,6 +26,7 @@ BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(BASE, "materials", "dataset_rv2.xlsx")
 DST = os.path.join(BASE, "materials", "dataset_rv31.xlsx")
 SRC_DOC = "코드북 R v3.1 (2026-11-26, 오세준)"
+SRC_ANS = "오세준 교수님 11/26 답변(미완 기준): 기존 12(미완)는 그대로, 신설 규칙은 13"
 
 # 코드북 v3.1 4. 내용 오류 코드 표 문구 그대로 (R11 주의는 표 아래 'R7과의 경계' 문단)
 V31_CODES = {
@@ -59,7 +59,7 @@ V31_CODES = {
         "name": "역함수 존재 조건의 잘못된 일반화",
         "정의": "역함수의 존재 조건을 잘못 일반화한 진술을 명시한다",
         "포함": "“함수니까 역함수가 있다” / “모든 함수에는 역함수가 있다” / “식으로 쓸 수 있으면 역함수가 있다”",
-        "제외": "올바른 절차를 보였으나 존재 조건을 따로 쓰지 않은 것 / 그런 진술을 쓰지 않은 답안에 추론으로 붙이지 않음. 오류 찾기 문항에서 ‘없다’고만 한 답은 그 자체로 R5가 아님(규칙 12)",
+        "제외": "올바른 절차를 보였으나 존재 조건을 따로 쓰지 않은 것 / 그런 진술을 쓰지 않은 답안에 추론으로 붙이지 않음. 오류 찾기 문항에서 ‘없다’고만 한 답은 그 자체로 R5가 아님(규칙 13)",  # v3.1 문서는 '규칙 12' — 11/26 답변으로 13이 됨
         "예시": "“함수니까 역함수가 있다”",
         "근거": "조정수(2024)가 존재·비존재를 대비한 문항을 후속 과제로 제안"
     },
@@ -118,8 +118,8 @@ V31_CODES = {
 CODEBOOK_FIELDS = (("name", "name"), ("정의", "definition"), ("포함", "include"), ("제외", "exclude"),
                    ("예시", "example"), ("근거", "evidence"), ("주의", "caution"))
 
-RULE_11_TAIL = "다만 어느 코드를 붙일지는 규칙 12에 따른다"
-RULE_12 = ("코드 후보가 둘 이상일 때는 학생이 실제로 쓴 문장으로 인용할 수 있는 코드를 주 코드로 한다",
+RULE_11_TAIL = "다만 어느 코드를 붙일지는 규칙 13에 따른다"
+RULE_13 = ("코드 후보가 둘 이상일 때는 학생이 실제로 쓴 문장으로 인용할 수 있는 코드를 주 코드로 한다",
            "쓰지 않은 것(부재)으로만 추론되는 코드는 주 코드로 쓰지 않고, 필요하면 missing_criteria로 기록한다. "
            "오류 찾기 문항에서 결론이 틀린 답안은, 이유를 함께 썼으면 그 이유에 드러난 오개념의 코드를 쓴다. "
            "이유를 쓰지 않았으면 기준 답에 해당하는 줄의 코드를 붙이고 J0으로 기록한다")
@@ -169,19 +169,11 @@ def build(src=SRC, dst=DST):
     d = ws.cell(r11, 3).value or ""
     if RULE_11_TAIL not in d:
         setv(ws, r11, 3, d.rstrip(". ") + ". " + RULE_11_TAIL, "11", "설명")
-    r12 = rows["12"]
-    if ws.cell(r12, 2).value != RULE_12[0]:
-        old = (ws.cell(r12, 2).value, ws.cell(r12, 3).value)
-        setv(ws, r12, 1, "답안 상태", "12(Rv3 미완 처리)", "번호")
+    if "13" not in rows:
         nr = ws.max_row + 1
-        ws.cell(nr, 1).value, ws.cell(nr, 2).value, ws.cell(nr, 3).value = 12, RULE_12[0], RULE_12[1]
-        log.append((ws.title, "12", "규칙·설명", None, " — ".join(RULE_12), SRC_DOC + " 7. 규칙 12 신설"))
-        # 번호 순서: 1~11, 12(신설), 답안 상태
-        vals = [[ws.cell(r, c).value for c in range(1, 4)] for r in range(2, ws.max_row + 1)]
-        vals.sort(key=lambda v: (isinstance(v[0], str), v[0] if not isinstance(v[0], str) else 99))
-        for i, v in enumerate(vals):
-            for c in range(3):
-                ws.cell(i + 2, c + 1).value = v[c]
+        ws.cell(nr, 1).value, ws.cell(nr, 2).value, ws.cell(nr, 3).value = 13, RULE_13[0], RULE_13[1]
+        log.append((ws.title, "13", "규칙·설명", None, " — ".join(RULE_13),
+                    SRC_DOC + " 7. 규칙 12 신설 → 번호 13 (" + SRC_ANS + ")"))
 
     # 06_LINE_JUDGMENT
     ws = wb["06_LINE_JUDGMENT"]
@@ -203,7 +195,7 @@ def build(src=SRC, dst=DST):
     h = {x: i + 1 for i, x in enumerate(_header(ws))}
     for r in range(2, ws.max_row + 1):
         if ws.cell(r, h["answer_id"]).value == "A-03-B":
-            setv(ws, r, h["비고"], "v3.1 단서: 이유를 함께 쓴 답안은 그 이유에 드러난 코드를 따른다(규칙 12). "
+            setv(ws, r, h["비고"], "v3.1 단서: 이유를 함께 쓴 답안은 그 이유에 드러난 코드를 따른다(규칙 13). "
                                    "이 답안처럼 '없다'만 쓰면 R5·J0", "A-03-B", "비고")
 
     # 00_README
@@ -211,12 +203,13 @@ def build(src=SRC, dst=DST):
     for r in range(1, ws.max_row + 1):
         k = ws.cell(r, 1).value
         if k == "코드북":
-            setv(ws, r, 2, "R-v3.1 · 내용 오류 R1–R3, R5–R11 (R4는 1차 보류) · 근거 수준 J0–J2 · 답안 상태 4종", "코드북", "내용")
+            setv(ws, r, 2, "R-v3.1 · 내용 오류 R1–R3, R5–R11 (R4는 1차 보류) · 근거 수준 J0–J2 · 답안 상태 4종 · 판정 규칙 1–13", "코드북", "내용")
         if k == "개정":
             v = ws.cell(r, 2).value or ""
             if "R-v3.1" not in v:
                 setv(ws, r, 2, v + " / R-v3.1 (2026-11-26, 오세준 교수님 코드북 R v3.1) — 판정 규칙 12(주 코드 선정) 신설·"
-                     "규칙 11 단서, R2·R5·R6·R9·R10·R11 문구, 문항 2·7 기준표, R4 1차 보류. 미완 처리 문구는 그대로", "개정", "내용")
+                     "규칙 11 단서, R2·R5·R6·R9·R10·R11 문구, 문항 2·7 기준표, R4 1차 보류. 11/26 답변: 기존 규칙 12(미완 처리)는 그대로 두고 "
+                     "주 코드 선정을 13으로(교수님 v3.2 예정)", "개정", "내용")
 
     # 바꾼 칸 기록
     if "CHANGES_v3.1" in wb.sheetnames:

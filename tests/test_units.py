@@ -143,6 +143,7 @@ PROMPT_FINGERPRINT = {
     "R-v3-with_codebook-kit-1.2-20261022-hongsu-rv2-1.5-xdfcadb76": "877183f70c90d0ec",  # 1.5: stopped_midway 칸
     "R-v3-with_codebook-kit-1.2-20261022-hongsu-rv2-1.6-xdfcadb76": "edf92c57f143a7fb",  # 1.6: 1.3 + violated_criterion (stopped_midway 없음)
     "R-v3-with_codebook-kit-1.2-20261022-hongsu-rv2-1.7-xdfcadb76": "edf92c57f143a7fb",  # 1.7: dataset_rv2로는 1.6과 같은 문구 (R-v3.1 자료 지원만 추가)
+    "R-v3-with_codebook-kit-1.2-20261022-hongsu-rv2-1.8-xdfcadb76": "8144a76338e50d94",  # 1.8: 교수님 11/26 — 4번 누락 코드 문장·main_error_code 괄호 삭제, code_candidates
 }
 
 
@@ -280,7 +281,7 @@ def test_sanitize_error_criterion_to_int():
 
 
 def test_dataset_v31_prompt(tmp_path, monkeypatch):
-    """R-v3.1 사본: 규칙 12 = 주 코드 선정, 미완 처리는 '답안 상태', R4 보류, 문항 2·7 기준표, 주의 항목."""
+    """R-v3.1 사본: 규칙 12 = 미완 처리(그대로), 13 = 주 코드 선정(11/26 답변), R4 보류, 문항 2·7 기준표, 주의 항목."""
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "experiments"))
     import build_dataset_v31
     import rv2_codebook
@@ -291,11 +292,21 @@ def test_dataset_v31_prompt(tmp_path, monkeypatch):
     mats = rv2_codebook.load(str(dst))
     assert mats["codebook_version"] == "R-v3.1"
     rules = {str(r["번호"]): r for r in mats["prompt_rules"]}
-    assert rules["12"]["규칙"].startswith("코드 후보가 둘 이상일 때") and rules["답안 상태"]["규칙"].startswith("중단된 답안")
+    assert rules["13"]["규칙"].startswith("코드 후보가 둘 이상일 때") and rules["12"]["규칙"].startswith("중단된 답안")
+    assert "규칙 13에 따른다" in rules["11"]["설명"] and "답안 상태" not in rules
     assert "R4" not in rv2.allowed_codes(mats, "INV-R-07")
     p7 = rv2.build_prompt(mats, "INV-R-07")["user_template"]
     assert "0이 아니기만 하면 된다고 보아 같은 부호 조건을 빠뜨리면 R2" in p7 and "- 주의: 포함 항목과 문구가 겹쳐도" in p7
-    assert "(판정 규칙 '답안 상태')" in p7 and "(판정 규칙 12)" not in p7
+    assert "(판정 규칙 12)" in p7 and "R5가 아님(규칙 13)" in rv2.build_prompt(mats, "INV-R-03")["user_template"]
+    assert "main_error_code에 적고" not in p7 and "wrong 줄이 없으면" not in p7 and "code_candidates" in p7
+    assert "code_candidates" in rv2.tool_schema("with_codebook")["input_schema"]["required"]
     assert "c = 3/a로 읽으면 R6" in rv2.build_prompt(mats, "INV-R-02")["user_template"]
     base = rv2.build_prompt(rv2_codebook.load(), "INV-R-07")["user_template"]
     assert "(판정 규칙 12)" in base and "- 주의:" not in base   # 원래 자료(R-v3)로는 그대로
+
+
+def test_code_candidates_normalized():
+    import rv2_grader
+    out = rv2_grader.normalize_result({"code_candidates": '[{"code": "r5", "reason": "x"}, "R1", {"code": ""}]'})
+    assert out["code_candidates"] == [{"code": "R5", "reason": "x"}, {"code": "R1"}]
+    assert "code_candidates" not in rv2_grader.normalize_result({})

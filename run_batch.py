@@ -55,7 +55,7 @@ def grade_remote(url: str, row: dict) -> dict:
     })
     d = resp.json()
     result_keys = ["lines", "main_error_code", "justification_level", "math_result_correct",
-                   "input_status", "review_needed", "review_reason", "response_complete", "missing_criteria"]
+                   "input_status", "review_needed", "review_reason", "response_complete", "missing_criteria", "code_candidates"]
     return {
         "model": d.get("model"), "prompt_version": d.get("prompt_version"),
         "grader_version": d.get("grader_version"), "git_commit": d.get("git_commit"),
