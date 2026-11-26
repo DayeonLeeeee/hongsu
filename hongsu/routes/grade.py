@@ -113,7 +113,7 @@ def grade_rv2_endpoint() -> ResponseReturnValue:
             # 미완 표시는 '중간에 멈춤' 기준 (요구 항목 누락인 response_complete와 다름)
             "completion_status": {True: "incomplete", False: "complete"}.get(res.get("stopped_midway")),
             "missing_criteria": res.get("missing_criteria", []),      # 대응 풀이가 없는 기준 번호 (코드 아님, 피드백용)
-            "code_candidates": res.get("code_candidates", []),        # 복수 코드 후보 (프롬프트 1.8~, DB에는 raw_responses로만 남음)
+            "code_candidates": res.get("code_candidates", []),        # 복수 코드 후보 (프롬프트 1.8~, DB code_candidates 컬럼)
             "validation_issues": rec.get("validation_issues", []),
             "error": rec.get("error"),
             # ── 재현성 필드 (README 규칙 5) ──

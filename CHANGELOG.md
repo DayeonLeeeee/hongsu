@@ -48,6 +48,7 @@
 
 | 날짜 | 변경 |
 | --- | --- |
+| 2026-11-26 | `rv2_gradings`에 `code_candidates`(jsonb) 컬럼 추가 — 프롬프트 1.8의 복수 코드 후보 저장. Railway Postgres는 서버 시작 때 자동 추가(`db.py` ADD COLUMN IF NOT EXISTS), Supabase는 `sql/2026-11-26_rv2_gradings_code_candidates.sql` 1회 실행. `/grade` 응답에도 `code_candidates` |
 | 2026-11-26 | `/grade`의 정답 여부·미완 표시를 11/11 합의 3에 맞춤: `is_correct`는 `stopped_midway`가 true일 때만 비우고(중간에 멈춘 답안), 끝까지 쓴 오답은 오답으로 둠. `completion_status`도 `stopped_midway` 기준. 11/25에 `response_complete`(요구 항목 누락)로 비우던 것은 끝까지 쓴 오답(A-05-B 등)까지 비워서 바꿈 |
 | 2026-11-25 | 3회 점검 수정: `answer_id`에 무작위 6자를 붙여 같은 초에 같은 문항을 낸 학생끼리 겹치지 않게 함. 요청 횟수 제한의 IP를 Railway가 덮어쓰는 `X-Real-IP` 기준으로(클라이언트가 꾸밀 수 있는 `X-Forwarded-For` 대신). DB 저장 실패 시 기록을 버리지 않고 보류했다가 다시 넣음(`/health?deep=1`에 `pending`). `ADMIN_TOKEN`을 설정하면 관리 기능(문항 추가·수정·삭제, 엑셀 다시 읽기, 사용량)에 `X-Admin-Token` 필요 |
 | 2026-11-25 | API 사용량·비용: 채점마다 `cost_usd`(호출별 실제 응답 모델 가격, `usage_cost.py`) 기록, 로그에 토큰·비용, `/refine`(Haiku)·`/ocr`(Gemini 토큰 + Mathpix 요청당) 비용, `GET /admin/usage`(서버 누적 + DB 날짜·모델별 합계), `experiments/usage_report.py` |

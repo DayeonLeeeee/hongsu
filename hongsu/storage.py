@@ -35,7 +35,8 @@ RV2_SAVE_KEYS = ["answer_id", "problem_id", "student_id", "attempt_count", "mode
 RV2_SAVE_KEYS_V13 = ["request_id", "outcome", "review_sources", "grader_version", "tool_choice",
                      "response_models", "extraction", "first_issues",
                      "reveal_answer", "feedback",   # 학생이 실제로 본 것 (공개 기준·피드백이 바뀌어도 복원 가능)
-                     "git_commit", "cost_usd"]
+                     "git_commit", "cost_usd",
+                     "code_candidates"]   # 프롬프트 1.8~ (sql/2026-11-26_rv2_gradings_code_candidates.sql)
 
 # DB에 못 쓴 행: 메모리에 잡아 두고 다음 저장(또는 /health?deep=1) 때 다시 넣는다.
 # 서버가 재시작되면 사라지므로, 행 전체를 로그에도 남긴다 ("[DB 보류 행]" 줄로 복구 가능).

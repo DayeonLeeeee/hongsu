@@ -53,7 +53,10 @@ CREATE TABLE IF NOT EXISTS rv2_gradings (
     reveal_answer       boolean,       -- 정답 공개 여부 (공개 기준이 바뀌어도 당시 화면 복원용)
     feedback            jsonb,         -- 학생에게 보여 준 피드백
     git_commit          text,          -- 채점에 쓴 코드의 git 커밋 ('+dirty' = 커밋 안 된 수정 포함)
-    cost_usd            numeric        -- 이 답안 채점 비용 (USD, usage_cost.PRICES 기준)
+    cost_usd            numeric,       -- 이 답안 채점 비용 (USD, usage_cost.PRICES 기준)
+
+    -- 프롬프트 1.8 (2026-11-26)
+    code_candidates     jsonb          -- 복수 코드 후보 [{code, reason}]
 );
 
 CREATE INDEX IF NOT EXISTS rv2_gradings_problem_idx ON rv2_gradings (problem_id);

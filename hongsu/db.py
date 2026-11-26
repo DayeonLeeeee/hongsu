@@ -23,6 +23,7 @@ RV2_COLUMNS = {
     "request_id": "text", "outcome": "text", "review_sources": "jsonb", "grader_version": "text",
     "tool_choice": "text", "response_models": "jsonb", "extraction": "jsonb", "first_issues": "jsonb",
     "reveal_answer": "boolean", "feedback": "jsonb", "git_commit": "text", "cost_usd": "numeric",
+    "code_candidates": "jsonb",   # 프롬프트 1.8~ 복수 코드 후보 (교수님 11/26)
 }
 
 _DDL = ["CREATE TABLE IF NOT EXISTS rv2_gradings ("
