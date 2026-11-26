@@ -38,7 +38,7 @@ import re
 
 CODEBOOK_VERSION = "R-v2"             # 엑셀에 버전이 없을 때만 쓰는 기본값 (실제 값은 mats["codebook_version"])
 BUILDER_VERSION = "kit-1.2-20261022"  # v1.2: 33건 개발셋 교정 패치 (J 6규칙, C-1~C-5)
-PORT_VERSION = "hongsu-rv2-1.4"       # hongsu 이식본 버전 (1.2: R-v3 규칙 11·12 대응, 1.3: 출력 형식 규칙 추가 — 판정 기준 변경 없음, 1.4: 줄별 error_criterion 칸 추가 — 11/11 회의 합의 2)
+PORT_VERSION = "hongsu-rv2-1.5"       # hongsu 이식본 버전 (1.2: R-v3 규칙 11·12 대응, 1.3: 출력 형식 규칙 추가 — 판정 기준 변경 없음, 1.4: 줄별 error_criterion 칸(11/11 합의 2), 1.5: stopped_midway 칸(합의 3) 추가)
 
 # v1.2 패치 — 33건 개발셋(전문가 라벨)으로 교정된 추가 판정 규칙.
 # 주의: 사후 적합된 규칙이므로 홀드아웃(신규 합성답안)에서 검증 전까지는 잠정.
@@ -160,6 +160,7 @@ SCHEMA_WITH_CODEBOOK = """{
  "review_needed": false,
  "review_reason": "",
  "response_complete": true 또는 false (문항의 요구 항목을 모두 썼으면 true),
+ "stopped_midway": true 또는 false (학생이 풀이를 끝까지 쓰지 않고 중간에 멈춰 최종 답을 내지 않았으면 true. 끝까지 쓰고 답을 냈으면 요구 항목이 빠졌거나 틀렸어도 false),
  "missing_criteria": [대응하는 학생 풀이가 없는 기준 번호들, 없으면 []]
 }"""
 
@@ -214,11 +215,16 @@ def tool_schema(mode: str) -> dict:
             "review_reason": {"type": "string"},
             "response_complete": {"type": "boolean",
                                   "description": "문항의 요구 항목을 모두 썼으면 true, 중단·누락이 있으면 false"},
+            # 1.5 — 11/11 회의 합의 3: 정오답은 끝까지 썼는지로 나누고, 중간에 멈춘 답안은 미완.
+            # response_complete(요구 항목 누락)와 따로 둔다.
+            "stopped_midway": {"type": "boolean",
+                               "description": "학생이 풀이를 끝까지 쓰지 않고 중간에 멈춰 최종 답을 내지 않았으면 true. "
+                                              "끝까지 쓰고 답을 냈으면 요구 항목이 빠졌거나 틀렸어도 false"},
             "missing_criteria": {"type": "array", "items": {"type": "integer"},
                                  "description": "대응하는 학생 풀이가 없는 기준 번호 (코드 아님, 피드백용). 없으면 []"},
         })
         required += ["main_error_code", "justification_level", "review_needed",
-                     "response_complete", "missing_criteria"]
+                     "response_complete", "stopped_midway", "missing_criteria"]
     else:
         props["notes"] = {"type": "string"}
     props["lines"] = {"type": "array", "items": {"type": "object", "properties": line_props,

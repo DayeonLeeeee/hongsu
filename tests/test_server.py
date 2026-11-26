@@ -206,11 +206,21 @@ def test_grade_abstain_goes_to_review_and_reveal_after_3_wrong(env, monkeypatch)
 
 def test_grade_incomplete_answer(env):
     res = good()
-    res.update(response_complete=False, missing_criteria=["5"])
+    # 요구 항목이 빠졌지만 끝까지 쓰고 답을 낸 오답(A-05-B 같은 경우): 오답 그대로
+    res.update(response_complete=False, stopped_midway=False, missing_criteria=["5"])
     env.claude.result = res
     j = env.client.post("/grade", json={"problem_id": "INV-R-01", "solution_text": ANSWER}).get_json()
     assert j["outcome"] == "incomplete" and j["missing_criteria"] == [5]
-    assert j["completion_status"] == "incomplete" and j["is_correct"] is None   # 미완은 정답·오답으로 나누지 않음
+    assert j["completion_status"] == "complete" and j["is_correct"] is False
+
+
+def test_grade_stopped_midway_is_not_graded_right_or_wrong(env):
+    """11/11 합의 3: 중간에 멈춘 답안만 정답·오답으로 나누지 않는다."""
+    res = good()
+    res.update(response_complete=False, stopped_midway=True, missing_criteria=["5"])
+    env.claude.result = res
+    j = env.client.post("/grade", json={"problem_id": "INV-R-01", "solution_text": ANSWER}).get_json()
+    assert j["stopped_midway"] is True and j["completion_status"] == "incomplete" and j["is_correct"] is None
 
 
 def test_grade_api_failure_still_answers_with_error(env, monkeypatch):

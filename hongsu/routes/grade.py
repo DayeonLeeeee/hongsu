@@ -109,7 +109,9 @@ def grade_rv2_endpoint() -> ResponseReturnValue:
             "review_needed": review_needed,
             "review_reason": res.get("review_reason", ""),
             "response_complete": res.get("response_complete"),       # R-v3 규칙 12: False면 미완 답안
-            "completion_status": {True: "complete", False: "incomplete"}.get(res.get("response_complete")),
+            "stopped_midway": res.get("stopped_midway"),               # 11/11 합의 3: True면 중간에 멈춘 답안(미완)
+            # 미완 표시는 '중간에 멈춤' 기준 (요구 항목 누락인 response_complete와 다름)
+            "completion_status": {True: "incomplete", False: "complete"}.get(res.get("stopped_midway")),
             "missing_criteria": res.get("missing_criteria", []),      # 대응 풀이가 없는 기준 번호 (코드 아님, 피드백용)
             "validation_issues": rec.get("validation_issues", []),
             "error": rec.get("error"),
@@ -132,7 +134,8 @@ def grade_rv2_endpoint() -> ResponseReturnValue:
             "first_issues": rec.get("first_issues", []),    # 첫 호출 정제·검증 사유 (재시도로 해결돼도 기록)
             # ── 기존 프론트 호환 ──
             # 미완 답안은 정답·오답으로 나누지 않는다 (계획 문서 라벨·데이터 작업 2번)
-            "is_correct": None if res.get("response_complete") is False else res.get("math_result_correct"),
+            # 중간에 멈춘 답안만 정답·오답으로 나누지 않는다 (11/11 합의 3). 끝까지 쓴 오답은 오답으로 둔다.
+            "is_correct": None if res.get("stopped_midway") is True else res.get("math_result_correct"),
             "steps": rv2_grader.to_server_steps(res),
             "reveal_answer": (res.get("math_result_correct") is False) and attempt_count >= MAX_ATTEMPTS_BEFORE_REVEAL,
             "feedback": {"feedback": "", "detailed_feedback": "", "next_focus": []},  # 피드백은 다음 단계

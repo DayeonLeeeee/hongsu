@@ -140,6 +140,7 @@ def test_every_problem_builds_a_prompt_with_its_codes():
 PROMPT_FINGERPRINT = {
     "R-v3-with_codebook-kit-1.2-20261022-hongsu-rv2-1.3-xdfcadb76": "a843fc32e2382099",
     "R-v3-with_codebook-kit-1.2-20261022-hongsu-rv2-1.4-xdfcadb76": "7a1d2b54929654b9",  # 1.4: error_criterion 칸
+    "R-v3-with_codebook-kit-1.2-20261022-hongsu-rv2-1.5-xdfcadb76": "877183f70c90d0ec",  # 1.5: stopped_midway 칸
 }
 
 

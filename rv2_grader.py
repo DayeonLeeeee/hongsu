@@ -75,7 +75,7 @@ if RV2_TOOL_CHOICE not in ("tool", "auto"):
     RV2_TOOL_CHOICE = _defaults["tool_choice"]
 
 # 채점 동작(정제·검증·재시도 로직) 버전. 프롬프트가 같아도 이 값이 다르면 결과를 직접 비교하지 않는다.
-GRADER_VERSION = "rv2-grader-1.5"   # 1.4: 미완 답안의 R3를 검증에서 거른다, 1.5: error_criterion 정수 정리 (CHANGELOG)
+GRADER_VERSION = "rv2-grader-1.6"   # 1.4: 미완 답안의 R3를 검증에서 거른다, 1.5: error_criterion 정수 정리, 1.6: stopped_midway 불리언 정리 (CHANGELOG)
 
 USAGE_KEYS = ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
 
@@ -152,6 +152,11 @@ def normalize_result(parsed: dict) -> dict:
     if isinstance(rc, str):
         rc = {"true": True, "false": False}.get(rc.strip().lower())
     parsed["response_complete"] = rc if isinstance(rc, bool) else None
+    if "stopped_midway" in parsed:   # 1.6: 중간에 멈춤 (합의 3). 빼먹으면 None — 추정하지 않는다
+        sm = parsed.get("stopped_midway")
+        if isinstance(sm, str):
+            sm = {"true": True, "false": False}.get(sm.strip().lower())
+        parsed["stopped_midway"] = sm if isinstance(sm, bool) else None
     return parsed
 
 

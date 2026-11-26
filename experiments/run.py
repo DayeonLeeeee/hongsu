@@ -6,7 +6,7 @@
   python experiments/run.py status                     지금 할 수 있는 실험과 사람이 할 일 확인
   python experiments/run.py baseline                   1-1a·1-3·1-5·1-6·1-7·1-9 (11/11 결과, 비용 0)
   python experiments/run.py 1-2                        라벨 통일 후 첫 오류 줄 (비용 0)
-  python experiments/run.py 1-1b                       1.3 코드로 expert·holdout 재채점 + 1.2와 비교 + 1-9 (API 비용)
+  python experiments/run.py 1-1b                       지금 코드로 expert·holdout 재채점 + 1.2와 비교 + 1-9 (API 비용)
   python experiments/run.py 1-4                        설명문형 5건 변환본 채점 + 비교 (API 비용)
   python experiments/run.py 1-8 [--grade]              손글씨 OCR 엔진 비교 (OCR API 비용)
 
@@ -368,6 +368,12 @@ def cmd_1_2(a):
                f"1-2_unified_1.3_{s}")
 
 
+def prompt_ver():
+    """prompts/rv2.py의 PORT_VERSION 끝 번호 (예: hongsu-rv2-1.5 → 1.5)."""
+    from prompts.rv2 import PORT_VERSION
+    return PORT_VERSION.rsplit("-", 1)[-1]
+
+
 def cmd_1_1b(a):
     kit = kit_dir(a.kit)
     exp = need(os.path.join(ANSWERS, "expert_33.csv"), f"{PY} experiments/run.py setup")
@@ -382,10 +388,11 @@ def cmd_1_1b(a):
         new_exp = run_batch(exp)
         new_hold = run_batch(hold)
     s = stamp()
-    report(["--results", new_exp, "--answers", exp], f"1-1b_expert33_1.3_{s}")
-    report(["--results", new_hold, "--answers", hold], f"1-1b_holdout45_1.3_{s}")
+    v = prompt_ver()   # 파일 이름·표에 지금 프롬프트 버전을 적는다 (11/25 1.3 결과와 섞이지 않게)
+    report(["--results", new_exp, "--answers", exp], f"1-1b_expert33_{v}_{s}")
+    report(["--results", new_hold, "--answers", hold], f"1-1b_holdout45_{v}_{s}")
     for stem, base, new, ans in (("expert33", KIT_EXPERT_1111, new_exp, exp), ("holdout45", KIT_HOLDOUT_1111, new_hold, hold)):
-        compare(["--ids", "all", "--title", f"1-1b {stem} 1.2(11/11) vs 1.3", "--before-tag", "1.2", "--after-tag", "1.3",
+        compare(["--ids", "all", "--title", f"1-1b {stem} 1.2(11/11) vs {v}", "--before-tag", "1.2", "--after-tag", v,
                  "--before", kit_result(kit, base), "--before-answers", ans, "--after", new, "--after-answers", ans],
                 f"1-1b_{stem}_compare_{s}")
     say("\n1-9(코드 개선 후 재확인)는 위 1.3 보고서의 '지정 답안 확인' 섹션. 11/11 기준은 baseline 보고서와 비교.")

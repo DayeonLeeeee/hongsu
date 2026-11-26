@@ -76,6 +76,16 @@ def load_results(paths):
 CODE_UNIFIED_COL = "전문가_코드_통일"
 
 
+# 결과 보고서 머리에 버전별로 무엇이 바뀌었는지 적는다 (11/25 결과와 섞어 읽지 않도록).
+VERSION_NOTES = {
+    "hongsu-rv2-1.3": "출력 형식 규칙 추가(판정 기준 변경 없음). 줄 나누기 규칙 두 문장('학생 답안의 줄 하나 = lines 원소 하나', "
+                      "'여러 줄을 한 원소에 합치지 않는다')은 일부러 넣지 않음",
+    "hongsu-rv2-1.4": "줄마다 error_criterion(오류가 어긴 기준 번호) 칸 추가 — 11/11 합의 2. matched_criterion은 그대로",
+    "hongsu-rv2-1.5": "1.4 + 답안 전체에 stopped_midway(중간에 멈춤) 칸 추가 — 11/11 합의 3. 판정 절차·규칙·코드북·기준표는 1.3과 같음",
+    "rv2-grader-1.5": "error_criterion 정수 정리",
+    "rv2-grader-1.6": "1.5 + stopped_midway 불리언 정리. 검증 규칙·결과 분류(미완 회차 등)는 1.4와 같음(response_complete 기준)",
+}
+
 FIRST_LINE_COL = "전문가_첫오류_학생줄"   # prepare_answers와 같은 이름
 ERR_CRIT_COL = "전문가_오류기준"
 
@@ -378,10 +388,13 @@ def exp_1_5(runs, labels):
 
 
 def exp_1_6(runs, labels):
-    lab_inc, ai_inc = [], []
+    lab_inc, ai_inc, stop_rows = [], [], []
     for aid, lab in labels.items():
         recs = [r for _, r in runs.get(aid, [])]
         vals = [(r.get("result") or {}).get("response_complete") for r in recs]
+        sms = [(r.get("result") or {}).get("stopped_midway", "-") for r in recs]   # 1.5 이전 결과는 '-'
+        if lab["incomplete"] or any(x is True for x in sms):
+            stop_rows.append((aid, lab, sms))
         r3 = [any((ln.get("code") or "").upper() == "R3" for ln in ((r.get("result") or {}).get("lines") or [])
                   if isinstance(ln, dict)) or ((r.get("result") or {}).get("main_error_code") == "R3") for r in recs]
         if lab["incomplete"]:
@@ -404,6 +417,19 @@ def exp_1_6(runs, labels):
                 "| --- | --- | --- | --- | --- |"]
         for aid, lab, vals, per, _ in sorted(ai_inc, key=lambda x: x[0]):
             out.append(f"| {aid} | {lab['code'] or '없음'} | {'예' if lab['incomplete'] else ''} | {vals} | {' / '.join(per)} |")
+        out.append("")
+    if any(x != "-" for _, _, sms in stop_rows for x in sms):
+        n_lab = sum(1 for _, lab, _ in stop_rows if lab["incomplete"])
+        n_hit = sum(1 for _, lab, sms in stop_rows if lab["incomplete"] and sms and sms[0] is True)
+        n_extra = sum(1 for _, lab, sms in stop_rows if not lab["incomplete"] and any(x is True for x in sms))
+        out += ["### 1-6b 중간에 멈춤 (stopped_midway, 프롬프트 1.5부터)", "",
+                "11/11 합의 3의 미완(중간에 멈춘 답안)을 모델이 따로 답한 칸. 위 표의 response_complete(요구 항목 누락)와 다르다."
+                " 키트 방식 집계(코드 일치·미완 회차 분류)는 바꾸지 않고 response_complete 기준 그대로 둔다.", "",
+                f"- 라벨 미완 답안 중 1회차 stopped_midway=true: {n_hit}/{n_lab}",
+                f"- 라벨이 미완이 아닌데 한 번이라도 stopped_midway=true: {n_extra}건", "",
+                "| answer_id | 라벨 코드 | 라벨 미완 | AI stopped_midway (회차별) |", "| --- | --- | --- | --- |"]
+        out += [f"| {aid} | {lab['code'] or '없음'} | {'예' if lab['incomplete'] else ''} | {sms} |"
+                for aid, lab, sms in sorted(stop_rows, key=lambda x: x[0])]
         out.append("")
     return out
 
@@ -455,6 +481,10 @@ def header(results, kind, labels, args):
     out += [f"| {m[0]} | {m[1]} | {m[2] or '(1.3 이전)'} | {m[3]} | {c} |" for m, c in meta.most_common()]
     if len(meta) > 1:
         out += ["", "> 버전이 섞여 있다. 같은 조건끼리만 비교할 것."]
+    notes = [f"- **{k}**: {v}" for k, v in VERSION_NOTES.items()
+             if any(k in str(m[1]) or k == m[2] for m in meta)]
+    if notes:
+        out += ["", "이 결과의 버전에서 바뀐 점 (CHANGELOG.md):"] + notes
     out.append("")
     return out
 

@@ -10,6 +10,7 @@
 
 | 버전 | 날짜 | 변경 | 판정 기준 변경 |
 | --- | --- | --- | --- |
+| hongsu-rv2-1.5 | 2026-11-26 | 답안 전체에 `stopped_midway`(학생이 끝까지 쓰지 않고 중간에 멈춰 최종 답을 내지 않았으면 true, 끝까지 쓰고 답을 냈으면 요구 항목이 빠졌거나 틀렸어도 false) 칸 추가. 11/11 회의 합의 3(정오답은 끝까지 썼는지로 나누고 중간에 멈춘 답안은 미완). `response_complete`(요구 항목 누락)는 그대로 | 없음 (출력 칸 추가) |
 | hongsu-rv2-1.4 | 2026-11-26 | 줄마다 `error_criterion`(wrong이면 그 줄의 오류가 어긴 기준 번호, 아니면 null) 칸 추가. `matched_criterion`(그 줄이 해당하는 기준)은 그대로. 11/11 회의 합의 2(줄을 기준에 맞추는 일과 틀린 곳 진단을 한 칸에 섞지 않음). 출력 형식 규칙의 정수 필드 목록에도 추가. 판정 절차·규칙 문구는 그대로 | 없음 (출력 칸 추가) |
 | hongsu-rv2-1.3 | 2026-11-24 | 스키마 뒤에 출력 형식 규칙(`FORMAT_RULES`) 추가: 줄은 객체로, 불리언·null은 문자열 금지, judgment 소문자, 번호 필드는 정수, 도구를 못 쓰면 ```json 블록 하나 | 없음 |
 | hongsu-rv2-1.2 | 2026-10~11 | 코드북 R-v3(2026-10-30 오세준 교수님 승인본) 대응: `response_complete`·`missing_criteria` 출력 추가(규칙 12), '안 쓴 기준' 처리 단계 추가, C-3 적용 범위를 결론이 옳은 답안으로 한정(규칙 11), 코드북 버전을 엑셀에서 읽음 | 있음 (R-v3) |
@@ -24,6 +25,7 @@
 
 | 버전 | 날짜 | 변경 |
 | --- | --- | --- |
+| rv2-grader-1.6 | 2026-11-26 | `stopped_midway`를 불리언으로 정리(빠지면 null, 추정하지 않음). 검증 규칙은 그대로(미완 R3 재시도 규칙은 계속 `response_complete` 기준). 키트 방식 결과 분류(`outcome`의 incomplete, 실험의 미완 회차)도 그대로 `response_complete` 기준 |
 | rv2-grader-1.5 | 2026-11-26 | `error_criterion`을 `matched_criterion`과 같은 방식으로 정수 정리(①, "3" → 정수). 검증 규칙은 추가하지 않음 |
 | rv2-grader-1.4 | 2026-11-25 | 검증 규칙 1개 추가: 미완 답안(response_complete=false)에 주 코드 R3가 붙으면 사유를 붙여 재시도하고, 그래도 남으면 검수로 보낸다(계획 문서 라벨·데이터 작업 2번). 1.3 결과 269회 중 해당 사례 0건이라 지금까지 결과에는 영향이 없다. `/grade` 응답에 `completion_status` 추가, 미완이면 `is_correct`는 null |
 | rv2-grader-1.3 | 2026-11-24 | 응답 정제를 `sanitize()` 하나로 통합(고칠 수 있는 형식은 고치고, 못 고치는 것은 사유를 남겨 1회 재시도·검수). tool_use 블록이 없으면 텍스트의 JSON을 읽음(`extract_result`). 결과 블록이 없어도 1회 재시도. 모델별 호출 기본값(Opus 5.5: 도구 auto, temperature 없음). 기본 모델 Opus 5.5. `outcome`(graded/review/incomplete/not_attempted/unreadable/error)과 `review_sources` 분류. 기록 추가: `extraction`, `first_issues`, `response_models`, `tool_choice`, `git_commit` |
@@ -35,6 +37,7 @@
 
 | 날짜 | 변경 |
 | --- | --- |
+| 2026-11-26 | `/grade`의 정답 여부·미완 표시를 11/11 합의 3에 맞춤: `is_correct`는 `stopped_midway`가 true일 때만 비우고(중간에 멈춘 답안), 끝까지 쓴 오답은 오답으로 둠. `completion_status`도 `stopped_midway` 기준. 11/25에 `response_complete`(요구 항목 누락)로 비우던 것은 끝까지 쓴 오답(A-05-B 등)까지 비워서 바꿈 |
 | 2026-11-25 | 3회 점검 수정: `answer_id`에 무작위 6자를 붙여 같은 초에 같은 문항을 낸 학생끼리 겹치지 않게 함. 요청 횟수 제한의 IP를 Railway가 덮어쓰는 `X-Real-IP` 기준으로(클라이언트가 꾸밀 수 있는 `X-Forwarded-For` 대신). DB 저장 실패 시 기록을 버리지 않고 보류했다가 다시 넣음(`/health?deep=1`에 `pending`). `ADMIN_TOKEN`을 설정하면 관리 기능(문항 추가·수정·삭제, 엑셀 다시 읽기, 사용량)에 `X-Admin-Token` 필요 |
 | 2026-11-25 | API 사용량·비용: 채점마다 `cost_usd`(호출별 실제 응답 모델 가격, `usage_cost.py`) 기록, 로그에 토큰·비용, `/refine`(Haiku)·`/ocr`(Gemini 토큰 + Mathpix 요청당) 비용, `GET /admin/usage`(서버 누적 + DB 날짜·모델별 합계), `experiments/usage_report.py` |
 | 2026-11-25 | 입력 검증(잘못된 요청은 400과 이유, 답안·단계 수·본문 크기 상한), 요청 횟수 제한(학생별·IP별 1분당, 비용 드는 엔드포인트만), 결과에 `git_commit` 기록, requirements 버전 고정 |

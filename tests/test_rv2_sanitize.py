@@ -29,6 +29,7 @@ GOOD = {
     "review_needed": False,
     "review_reason": "",
     "response_complete": True,
+    "stopped_midway": False,
     "missing_criteria": [],
 }
 
