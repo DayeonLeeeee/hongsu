@@ -76,6 +76,10 @@ def load_results(paths):
 CODE_UNIFIED_COL = "전문가_코드_통일"
 
 
+FIRST_LINE_COL = "전문가_첫오류_학생줄"   # prepare_answers와 같은 이름
+ERR_CRIT_COL = "전문가_오류기준"
+
+
 def load_labels(path, v3_relabel=True, first_col="", code_col="", code_col_optional=False):
     """키트 load_labels + (선택) 라벨 통일본 열로 바꾸기.
     first_col: 첫 오류 줄 (예: 전문가_첫오류_통일)
@@ -99,6 +103,13 @@ def load_labels(path, v3_relabel=True, first_col="", code_col="", code_col_optio
                     lab["incomplete"] = True
         elif code_col and not code_col_optional:
             raise SystemExit(f"답안 CSV에 열이 없음: {code_col}")
+    # 첫 오류 두 열(사람이 채움, prepare_answers). 열이 있고 값이 있는 답안만 1-2b에서 비교한다.
+    with open(path, encoding="utf-8-sig") as f:
+        rows2 = {r["answer_id"]: r for r in csv.DictReader(f)}
+    for aid, lab in labels.items():
+        r = rows2.get(aid, {})
+        lab["first_line"] = K.to_int(r.get(FIRST_LINE_COL))
+        lab["err_crit"] = K.to_int(r.get(ERR_CRIT_COL))
     return kind, labels
 
 
@@ -222,8 +233,48 @@ def exp_1_2(runs, labels):
                    f"{' / '.join('-' if e is _NO_FIELD else ('없음' if e is None else str(e)) for e in errs)} | "
                    f"{' / '.join(codes)} | {hit}/{len(firsts)} |")
     out.append("")
-
+    out += _exp_1_2b(runs, labels)
     return out
+
+
+def _first_wrong(rec):
+    lines = [ln for ln in ((rec.get("result") or {}).get("lines") or []) if isinstance(ln, dict)]
+    wrong = [ln for ln in lines if ln.get("judgment") == "wrong"]
+    return wrong[0] if wrong else None
+
+
+def _exp_1_2b(runs, labels):
+    """첫 오류 두 열 비교: 학생줄(라벨) ↔ AI 첫 wrong 줄의 no, 오류기준(라벨) ↔ AI 첫 wrong 줄의 error_criterion.
+    1회차로 비교(1-2와 같은 방식). 라벨 두 열이 비어 있으면 건너뛴다."""
+    rows = [(aid, lab) for aid, lab in labels.items()
+            if lab.get("first_line") is not None or lab.get("err_crit") is not None]
+    if not rows:
+        return []
+    ln_n = ln_d = ec_n = ec_d = 0
+    table = []
+    for aid, lab in sorted(rows):
+        recs = [r for _, r in runs.get(aid, [])]
+        if not recs:
+            continue
+        fw = [_first_wrong(r) for r in recs]
+        nos = [K.to_int(w.get("no")) if w else None for w in fw]
+        ecs = [(K.to_int(w.get("error_criterion")) if "error_criterion" in w else _NO_FIELD) if w else None for w in fw]
+        if lab.get("first_line") is not None:
+            ln_d += 1
+            ln_n += int(nos[0] == lab["first_line"])
+        if lab.get("err_crit") is not None and ecs[0] is not _NO_FIELD:
+            ec_d += 1
+            ec_n += int(ecs[0] == lab["err_crit"])
+        fmt = lambda xs: " / ".join("-" if x is _NO_FIELD else ("없음" if x is None else str(x)) for x in xs)
+        table.append(f"| {aid} | {lab.get('first_line') if lab.get('first_line') is not None else ''} | {fmt(nos)} | "
+                     f"{lab.get('err_crit') if lab.get('err_crit') is not None else ''} | {fmt(ecs)} |")
+    return ["## 1-2b 첫 오류 두 열 (학생줄 · 오류기준)", "",
+            "라벨 '전문가_첫오류_학생줄'·'전문가_오류기준'(사람이 채운 열)과 AI 1회차 첫 wrong 줄의 no·error_criterion을 비교."
+            " error_criterion이 없는 결과(프롬프트 1.4 이전)는 오류기준 비교에서 뺀다('-').", "",
+            f"- **학생줄 일치: {_pct(ln_n, ln_d)}**",
+            f"- **오류기준 일치: {_pct(ec_n, ec_d)}**", "",
+            "| answer_id | 라벨 학생줄 | AI 첫 wrong 줄 no (회차별) | 라벨 오류기준 | AI error_criterion (회차별) |",
+            "| --- | --- | --- | --- | --- |"] + table + [""]
 
 
 _NO_FIELD = object()

@@ -194,7 +194,9 @@ def test_prepare_answers_from_xlsx_matches_kit_columns(tmp_path):
     with open(tmp_path / "expert_33.csv", encoding="utf-8-sig") as f:
         rows = list(csv.DictReader(f))
     assert len(rows) == 33 and list(rows[0].keys()) == (prepare_answers.KIT_COLS
-                                                        + [prepare_answers.UNIFIED_COL, prepare_answers.UNIFIED_CODE_COL])
+                                                        + [prepare_answers.UNIFIED_COL, prepare_answers.UNIFIED_CODE_COL,
+                                                           prepare_answers.FIRST_LINE_COL, prepare_answers.ERR_CRIT_COL])
+    assert all(r[prepare_answers.FIRST_LINE_COL] == "" and r[prepare_answers.ERR_CRIT_COL] == "" for r in rows)  # 빈칸
     assert all(r[prepare_answers.UNIFIED_COL] == r["전문가_첫오류"] for r in rows)
     assert all(r[prepare_answers.UNIFIED_CODE_COL] == r["전문가_코드"] for r in rows)
     kind, labels = K.load_labels(str(tmp_path / "expert_33.csv"), True)
@@ -351,3 +353,26 @@ def test_run_py_fixes_excel_saved_csv(tmp_path, monkeypatch):
     p.write_text("answer_id,학생_답안,전문가_첫오류,전문가_첫오류_통일\nA-04-A,f⁻¹(5)=2,(1),-2\n", encoding="utf-8-sig")
     with pytest.raises(SystemExit):
         R.check_answer_csvs()
+
+
+def test_first_error_two_columns_merge_and_score(tmp_path):
+    """사람이 채운 시트 → expert CSV 두 열 → 1-2b 표 (학생줄 ↔ no, 오류기준 ↔ error_criterion)."""
+    import openpyxl
+    import prepare_answers
+    import score_experiments as S
+    csvp = tmp_path / "expert_33.csv"
+    prepare_answers._write(str(csvp), prepare_answers.KIT_COLS, [
+        {"answer_id": "A1", "problem_id": "P", "유형": "오답", "학생_답안": "x", "전문가_줄별판정": "", "전문가_첫오류": "2",
+         "전문가_코드": "R8", "전문가_J": "J0", "비고": ""}])
+    wb = openpyxl.Workbook(); ws = wb.active
+    ws.append(["answer_id", prepare_answers.FIRST_LINE_COL, prepare_answers.ERR_CRIT_COL]); ws.append(["A1", 2, "4"])
+    wb.save(tmp_path / "s.xlsx")
+    prepare_answers.merge_first_error(str(tmp_path / "s.xlsx"), str(csvp))
+    _, labels = S.load_labels(str(csvp))
+    assert labels["A1"]["first_line"] == 2 and labels["A1"]["err_crit"] == 4
+    rec = lambda ec: {"answer_id": "A1", "repeat": 1, "result": {"main_error_code": "R8", "lines": [
+        {"no": 2, "judgment": "wrong", "matched_criterion": 3, "code": "R8", **({"error_criterion": ec} if ec else {})}]}}
+    out = "\n".join(S._exp_1_2b({"A1": [(1, rec(4))]}, labels))
+    assert "학생줄 일치: 1/1" in out and "오류기준 일치: 1/1" in out
+    old = "\n".join(S._exp_1_2b({"A1": [(1, rec(None))]}, labels))   # 1.4 이전 결과: 오류기준 비교에서 뺌
+    assert "오류기준 일치: 0/0" in old and "| - |" in old

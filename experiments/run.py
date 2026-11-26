@@ -145,7 +145,7 @@ def check_answer_csvs():
     - 한국어 Windows 엑셀의 일반 'CSV(쉼표로 분리)' 저장은 cp949라 f⁻¹의 '⁻' 같은 글자가 '?'로 바뀐다.
       → UTF-8(BOM)로 바꾸고 원본은 .cp949.bak으로 남긴다.
     - expert_33·holdout45는 키트에서 온 열(학생_답안, 라벨)을 키트 원본으로 되돌린다.
-      사람이 고치는 열은 expert_33의 '전문가_첫오류_통일' 하나뿐이므로 그 열만 그대로 둔다.
+      사람이 고치는 열(expert_33의 통일 열, 첫 오류 두 열)은 키트에 없는 열이라 그대로 둔다.
     - 엑셀은 '(1)'을 회계 음수 -1로 바꾼다 → 첫 오류 라벨이 조용히 '없음'이 되므로 멈춘다.
     - 그 밖의 파일(converted_5 등)은 사람이 쓴 내용이라 되돌릴 원본이 없다 → '?'가 생긴 칸을 알려 준다."""
     import prepare_answers   # 예전에 만든 expert_33·converted_5에 라벨 통일 열(코드)이 없으면 덧붙인다
@@ -153,7 +153,11 @@ def check_answer_csvs():
         p = os.path.join(ANSWERS, name)
         if os.path.exists(p):
             try:
-                prepare_answers.add_unified_cols(p) if name == "expert_33.csv" else _add_code_col(p)
+                if name == "expert_33.csv":
+                    prepare_answers.add_unified_cols(p)
+                    prepare_answers.add_first_error_cols(p)   # 첫 오류 두 열(빈칸, 사람이 채움)
+                else:
+                    _add_code_col(p)
             except (UnicodeDecodeError, KeyError):
                 pass   # 인코딩 문제는 아래에서 처리
     kit = _kit_soft()
