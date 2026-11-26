@@ -5,11 +5,11 @@ Hongsu 프롬프트 모음.
 결과에 함께 저장되어 재현성 확보 용도.
 
 파일 구성:
-  - ocr.py           : Gemini OCR 프롬프트 (문제/풀이)
+  - ocr.py           : Gemini OCR 프롬프트 (풀이)
   - refine.py        : Haiku 자연어 수정 프롬프트
-  - grading.py       : Opus 채점 프롬프트 (감점형)
-  - classify.py      : Opus H코드 직접 분류 프롬프트
-  - feedback.py      : Haiku 개인화 피드백 프롬프트
+  - rv2.py           : R v2 진단 프롬프트 (키트 prompt_builder 이식본)
+
+(옛 H코드 체계의 grading/classify/feedback 프롬프트는 1.3에서 삭제. backup-2026-11-24 브랜치에 있음)
 
 프롬프트 수정 시 각 파일 상단 VERSION을 반드시 갱신 (YYYY-MM-DD 포함).
 """

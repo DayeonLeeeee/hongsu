@@ -1,7 +1,11 @@
+# 버전 고정 (2026-11-25). Python 3.9~3.15에서 바이너리 휠만으로 설치되는 조합을 확인했다.
+# 올릴 때는 테스트(python -m pytest tests -q)와 회귀 테스트(experiments/regression.py)를 다시 돌린다.
 flask==3.1.1
-anthropic ==0.96.0
-google-generativeai>=0.8.0
-requests>=2.32.0
-gunicorn>=23.0.0
-supabase>=2.0.0
-openpyxl
+anthropic==0.96.0          # 1.0에서 temperature 처리 등이 바뀌었다. 올리면 rv2_grader의 모델별 호출 설정 확인
+google-generativeai==0.8.6
+requests==2.32.5
+gunicorn==23.0.0
+supabase==2.33.0
+psycopg[binary]==3.2.13; python_version < "3.10"    # 3.3부터 Python 3.10 이상
+psycopg[binary]==3.3.9; python_version >= "3.10"     # 3.2에는 Python 3.15용 휠이 없다
+openpyxl==3.1.5
