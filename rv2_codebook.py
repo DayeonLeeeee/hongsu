@@ -62,7 +62,7 @@ def _codebook_version(wb: Any) -> str:
         return "unknown"
     for row in wb[README_SHEET].iter_rows(values_only=True):
         if row and _cell(row[0]).strip() == "코드북" and len(row) > 1:
-            m = re.search(r"R-v\d+", _cell(row[1]))
+            m = re.search(r"R-v\d+(?:\.\d+)?", _cell(row[1]))   # R-v3, R-v3.1
             if m:
                 return m.group(0)
     return "unknown"

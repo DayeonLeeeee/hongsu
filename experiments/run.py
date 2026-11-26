@@ -9,6 +9,7 @@
   python experiments/run.py 1-1b                       지금 코드로 expert·holdout 재채점 + 1.2와 비교 + 1-9 (API 비용)
   python experiments/run.py 1-4                        설명문형 5건 변환본 채점 + 비교 (API 비용)
   python experiments/run.py 1-8 [--grade]              손글씨 OCR 엔진 비교 (OCR API 비용)
+  python experiments/run.py v31                        코드북 R v3.1 자료로 expert·holdout·변환 답안 채점 + v3.1 라벨로 집계 (API 비용)
 
 macOS에서는 python 대신 python3를 쓴다. 보고서는 experiments/out/ 아래에 쌓인다.
 API 비용이 드는 명령은 호출 수를 보여 주고 확인을 받는다 (--yes로 건너뜀).
@@ -435,6 +436,44 @@ def cmd_1_4(a):
         say("\n(변환 전 = 11/11 결과(1.2), 변환 후 = 1.3 코드. 1-1b에서 판정 차이가 있었으면 --before-13 으로 다시 비교)")
 
 
+V31_XLSX = os.path.join(ROOT, "materials", "dataset_rv31.xlsx")
+V31_COLS = {"expert_33.csv": ("전문가_코드_v31", "전문가_첫오류_v31"), "holdout45.csv": ("확정_주_v31", "첫오류_v31"),
+            "converted_5.csv": ("전문가_코드_v31", "")}
+
+
+def cmd_v31(a):
+    """코드북 R v3.1 자료(dataset_rv31.xlsx)로 expert·holdout·변환 답안을 채점하고, v3.1 라벨 열로 집계."""
+    if not os.path.exists(V31_XLSX):
+        import build_dataset_v31
+        build_dataset_v31.build()
+        say(f"materials/dataset_rv31.xlsx 만듦 (바뀐 칸: 엑셀 CHANGES_v3.1 시트)")
+    os.environ["RV2_XLSX"] = V31_XLSX      # run_batch.py가 이 자료로 프롬프트를 만든다
+    sets = []
+    for name, (code_col, first_col) in V31_COLS.items():
+        p = os.path.join(ANSWERS, name)
+        if not os.path.exists(p):
+            continue
+        cols = read_csv(p)[0].keys()
+        miss = [c for c in (code_col, first_col) if c and c not in cols]
+        if miss:
+            stop(f"answers/{name}에 v3.1 라벨 열이 없음: {miss}")
+        sets.append((name, p, code_col, first_col))
+    s = stamp()
+    for name, p, code_col, first_col in sets:
+        stem = os.path.splitext(name)[0]
+        filled = [r for r in read_csv(p) if (r.get("학생_답안") or "").strip()]
+        if a.reuse:
+            files = sorted(glob.glob(os.path.join(RESULTS, f"stage3_{stem}_*R-v3.1_*.jsonl")), key=os.path.getmtime)
+            new = files[-1] if files else stop(f"--reuse: results/에 R-v3.1 {stem} 결과가 없음")
+        else:
+            need_api_key()
+            confirm(len(filled) * 3, f"v3.1 {stem} {len(filled)}건 × 3회", a.yes)
+            new = run_batch(p)
+        argv = ["--results", new, "--answers", p, "--code-col", code_col] + (["--first-col", first_col] if first_col else [])
+        report(argv, f"v31_{stem}_{result_ver(new)}_{s}")
+    say("\n결과 파일 이름에 'R-v3.1'이 들어간다. 라벨은 v3.1 열(교수님 22건 판정 반영), 원래·통일 열은 그대로.")
+
+
 def cmd_1_8(a):
     samples = need(os.path.join(ANSWERS, "ocr", "ocr_samples.csv"),
                    "experiments/templates/ocr_samples.csv를 answers/ocr/ocr_samples.csv로 복사해서 채우고, 사진은 answers/ocr/images/에")
@@ -453,11 +492,11 @@ def cmd_1_8(a):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=["setup", "status", "baseline", "1-2", "1-1b", "1-4", "1-8"])
+    ap.add_argument("command", choices=["setup", "status", "baseline", "1-2", "1-1b", "1-4", "1-8", "v31"])
     ap.add_argument("--kit", default="", help="rv2_kit 폴더 (setup 후에는 생략 가능)")
     ap.add_argument("--yes", action="store_true", help="API 비용 확인 질문을 건너뜀")
     ap.add_argument("--force", action="store_true", help="setup: answers/ 파일을 새로 만듦 (고친 라벨이 지워짐)")
-    ap.add_argument("--reuse", action="store_true", help="1-1b·1-4: 새로 채점하지 않고 results/의 최신 결과로 분석만")
+    ap.add_argument("--reuse", action="store_true", help="1-1b·1-4·v31: 새로 채점하지 않고 results/의 최신 결과로 분석만")
     ap.add_argument("--before-13", action="store_true", help="1-4: 변환 전 비교 대상을 1.3 expert 결과로")
     ap.add_argument("--grade", action="store_true", help="1-8: 채점 영향까지 (채점 비용)")
     ap.add_argument("--engines", default="gemini,mathpix,claude,azure", help="1-8: 비교할 OCR 엔진")
@@ -471,7 +510,7 @@ def main(argv=None):
     if a.command != "setup":
         check_answer_csvs()
     {"setup": cmd_setup, "status": cmd_status, "baseline": cmd_baseline, "1-2": cmd_1_2,
-     "1-1b": cmd_1_1b, "1-4": cmd_1_4, "1-8": cmd_1_8}[a.command](a)
+     "1-1b": cmd_1_1b, "1-4": cmd_1_4, "1-8": cmd_1_8, "v31": cmd_v31}[a.command](a)
 
 
 if __name__ == "__main__":

@@ -84,6 +84,11 @@ VERSION_NOTES = {
     "hongsu-rv2-1.5": "1.4 + 답안 전체에 stopped_midway(중간에 멈춤) 칸 추가 — 11/11 합의 3. 판정 절차·규칙·코드북·기준표는 1.3과 같음",
     "hongsu-rv2-1.6": "1.3 + 줄마다 violated_criterion(오류가 어긴 기준 번호) 칸 — 11/11 합의 2, 이름은 코드북 R v3.1 기록 표대로. "
                       "1.4·1.5의 error_criterion과 같은 뜻(이름만 바꿈). stopped_midway 칸은 없음. 판정 절차·규칙·코드북·기준표는 1.3과 같음",
+    "hongsu-rv2-1.7": "1.6 + R-v3.1 자료를 읽을 수 있게 함(코드 '주의' 항목 출력, 판정 절차 4번이 가리키는 미완 처리 규칙 이름). "
+                      "dataset_rv2.xlsx(R-v3)로 만든 프롬프트는 1.6과 같음",
+    "R-v3.1": "자료 dataset_rv31.xlsx — 코드북 R v3.1(2026-11-26 오세준 교수님): 판정 규칙 12(주 코드 선정) 신설·11 단서, "
+              "R2·R5·R6·R9·R10·R11 문구, 문항 2·7 기준표, R4 1차 보류. 미완 처리 문구와 프롬프트의 C-1·판정 절차 4번 문장은 그대로(교수님 답 대기). "
+              "바뀐 칸은 엑셀 CHANGES_v3.1 시트",
     "rv2-grader-1.5": "error_criterion 정수 정리",
     "rv2-grader-1.6": "1.5 + stopped_midway 불리언 정리. 검증 규칙·결과 분류(미완 회차 등)는 1.4와 같음(response_complete 기준)",
     "rv2-grader-1.7": "1.6 + violated_criterion 정수 정리. 검증 규칙·결과 분류는 1.4와 같음",
@@ -111,7 +116,7 @@ def load_labels(path, v3_relabel=True, first_col="", code_col="", code_col_optio
         if code_col and code_col in cols:
             for aid, lab in labels.items():
                 v = (rows.get(aid, {}).get(code_col) or "").strip()
-                lab["code"] = None if v in ("", "없음", "미완", "코드없음") else v
+                lab["code"] = None if v in ("", "없음", "미완", "코드없음", "정답") else v
                 if v == "미완":
                     lab["incomplete"] = True
         elif code_col and not code_col_optional:
@@ -219,6 +224,7 @@ def exp_1_2(runs, labels):
     first_n = first_d = 0
     rep_hit = defaultdict(lambda: [0, 0])
     table = []
+    crit_only = []   # 코드 v3.1 9. 「기준 번호 불일치」: 코드(다수결)는 맞고 첫 오류 기준만 다름
     for aid, lab in labels.items():
         recs = [r for _, r in runs.get(aid, [])]
         if lab["type"] != "오답" or lab["first"] is None or not recs:
@@ -231,11 +237,15 @@ def exp_1_2(runs, labels):
             rep_hit[rep][1] += 1
         errs = [_first_error_criterion(r) for r in recs]
         table.append((aid, lab, firsts, [run_label(r) for r in recs], errs))
+        if K.is_match(answer_vote(recs), lab["code"]) and firsts[0] != lab["first"]:
+            crit_only.append(aid)
 
     out = ["## 1-2 첫 오류 줄 일치 (기준표 번호)", "",
            "키트 정의: 라벨 첫 오류(기준표 번호)와 AI 첫 wrong 줄의 matched_criterion을 1회차 결과로 비교.", "",
            f"- **첫 오류 줄 일치: {_pct(first_n, first_d)}**",
-           "- 회차별: " + ", ".join(f"{k}회차 {v[0]}/{v[1]}" for k, v in sorted(rep_hit.items(), key=lambda x: str(x[0]))), "",
+           "- 회차별: " + ", ".join(f"{k}회차 {v[0]}/{v[1]}" for k, v in sorted(rep_hit.items(), key=lambda x: str(x[0]))),
+           f"- 기준 번호 불일치 (코드는 다수결로 맞고 첫 오류 기준만 다름, 1회차): {len(crit_only)}건"
+           + (f" — {', '.join(sorted(crit_only))}" if crit_only else ""), "",
            "AI 어긴 기준(violated_criterion, 1.4·1.5 결과에서는 error_criterion이라는 이름)은 참고용으로 함께 적는다(일치 계산에는 쓰지 않음, 이 칸이 없는 결과는 '-').", "",
            "| answer_id | 라벨 코드 | 라벨 첫 줄 | AI 첫 줄 (회차별) | AI 어긴 기준 (회차별) | AI 코드 (회차별) | 일치 회차 |",
            "| --- | --- | --- | --- | --- | --- | --- |"]
@@ -491,7 +501,7 @@ def header(results, kind, labels, args):
     if len(meta) > 1:
         out += ["", "> 버전이 섞여 있다. 같은 조건끼리만 비교할 것."]
     notes = [f"- **{k}**: {v}" for k, v in VERSION_NOTES.items()
-             if any(k in str(m[1]) or k == m[2] for m in meta)]
+             if any(k in str(m[1]) or k == m[2] or k == m[3] for m in meta)]
     if notes:
         out += ["", "이 결과의 버전에서 바뀐 점 (CHANGELOG.md):"] + notes
     out.append("")

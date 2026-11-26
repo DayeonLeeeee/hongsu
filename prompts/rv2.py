@@ -38,7 +38,7 @@ import re
 
 CODEBOOK_VERSION = "R-v2"             # 엑셀에 버전이 없을 때만 쓰는 기본값 (실제 값은 mats["codebook_version"])
 BUILDER_VERSION = "kit-1.2-20261022"  # v1.2: 33건 개발셋 교정 패치 (J 6규칙, C-1~C-5)
-PORT_VERSION = "hongsu-rv2-1.6"       # hongsu 이식본 버전 (1.2: R-v3 규칙 11·12 대응, 1.3: 출력 형식 규칙 추가 — 판정 기준 변경 없음, 1.4: 줄별 어긴 기준 칸(11/11 합의 2), 1.5: stopped_midway 칸(합의 3), 1.6: 1.3 + 어긴 기준 칸을 코드북 v3.1 이름 violated_criterion으로 — stopped_midway 뺌)
+PORT_VERSION = "hongsu-rv2-1.7"       # hongsu 이식본 버전 (1.2: R-v3 규칙 11·12 대응, 1.3: 출력 형식 규칙 추가 — 판정 기준 변경 없음, 1.4: 줄별 어긴 기준 칸(11/11 합의 2), 1.5: stopped_midway 칸(합의 3), 1.6: 1.3 + 어긴 기준 칸을 코드북 v3.1 이름 violated_criterion으로 — stopped_midway 뺌, 1.7: R-v3.1 자료(dataset_rv31.xlsx)를 읽을 수 있게 — 코드 주의 항목, 미완 처리 참조 이름. dataset_rv2.xlsx로 만든 프롬프트는 1.6과 같음)
 
 # v1.2 패치 — 33건 개발셋(전문가 라벨)으로 교정된 추가 판정 규칙.
 # 주의: 사후 적합된 규칙이므로 홀드아웃(신규 합성답안)에서 검증 전까지는 잠정.
@@ -103,6 +103,7 @@ def _codebook_block(mats: dict, codes: list) -> str:
             f"- 포함: {r['include']}\n"
             f"- 제외: {r['exclude']}\n"
             f"- 예시: {r['example']}"
+            + (f"\n- 주의: {r['caution']}" if r.get("caution") else "")   # R-v3.1: R2·R9·R11 주의
         )
     return "\n\n".join(out)
 
@@ -125,6 +126,14 @@ def _criteria_block(mats: dict, problem_id: str, with_codes: bool) -> str:
             line += f"   — wrong일 때: {w}"
         out.append(line)
     return "\n".join(out)
+
+
+def _incomplete_rule_ref(mats: dict) -> str:
+    """판정 절차 4번이 가리키는 미완 처리 규칙의 이름.
+    R-v3 자료에서는 판정 규칙 12, R-v3.1 자료에서는 12가 '주 코드 선정'이 되고 미완 처리는 '답안 상태'로 옮겨졌다.
+    (4번 문장 자체는 교수님 답을 기다리는 중이라 그대로 두고, 가리키는 번호만 자료에 맞춘다)"""
+    nums = {str(r.get("번호")) for r in mats.get("prompt_rules", [])}
+    return "판정 규칙 '답안 상태'" if "답안 상태" in nums else "판정 규칙 12"
 
 
 def _rules_block(mats: dict, with_codes: bool) -> str:
@@ -272,7 +281,7 @@ def build_prompt(mats: dict, problem_id: str, mode: str = "with_codebook") -> di
             "4) 학생 풀이가 대응하지 않는 기준은 wrong 줄로 만들지 말고 missing_criteria에 기준 번호를 적는다"
             " (인용할 원문이 없으므로). 그 누락이 기준 판정표의 'wrong일 때'에 해당하는 오류이면"
             " 그 코드를 main_error_code에 적고, 그렇지 않은 누락·중단은 코드 없이"
-            " response_complete=false로만 기록한다 (판정 규칙 12)",
+            f" response_complete=false로만 기록한다 ({_incomplete_rule_ref(mats)})",
             "5) 풀이 전체의 근거 수준(J) 판정",
         ]
         schema = SCHEMA_WITH_CODEBOOK
