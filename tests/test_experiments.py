@@ -107,7 +107,7 @@ def test_expert_first_line_matches_kit_definition(expert):
     # 라벨 통일본 열을 쓰면 A1도 일치
     t2 = run_report(["--results", res_path, "--answers", ans, "--first-col", "전문가_첫오류_통일", "--only", "1-2"])
     assert "**첫 오류 줄 일치: 2/2 (100.0%)**" in t2
-    assert "| A1 | R8 | 2 | 2 / 2 / 없음 | R8 / R8 / 없음(기권) | 2/3 |" in t2
+    assert "| A1 | R8 | 2 | 2 / 2 / 없음 | - / - / 없음 | R8 / R8 / 없음(기권) | 2/3 |" in t2
 
 
 def test_expert_focus_and_vote(expert):

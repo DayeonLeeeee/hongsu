@@ -10,6 +10,7 @@
 
 | 버전 | 날짜 | 변경 | 판정 기준 변경 |
 | --- | --- | --- | --- |
+| hongsu-rv2-1.4 | 2026-11-26 | 줄마다 `error_criterion`(wrong이면 그 줄의 오류가 어긴 기준 번호, 아니면 null) 칸 추가. `matched_criterion`(그 줄이 해당하는 기준)은 그대로. 11/11 회의 합의 2(줄을 기준에 맞추는 일과 틀린 곳 진단을 한 칸에 섞지 않음). 출력 형식 규칙의 정수 필드 목록에도 추가. 판정 절차·규칙 문구는 그대로 | 없음 (출력 칸 추가) |
 | hongsu-rv2-1.3 | 2026-11-24 | 스키마 뒤에 출력 형식 규칙(`FORMAT_RULES`) 추가: 줄은 객체로, 불리언·null은 문자열 금지, judgment 소문자, 번호 필드는 정수, 도구를 못 쓰면 ```json 블록 하나 | 없음 |
 | hongsu-rv2-1.2 | 2026-10~11 | 코드북 R-v3(2026-10-30 오세준 교수님 승인본) 대응: `response_complete`·`missing_criteria` 출력 추가(규칙 12), '안 쓴 기준' 처리 단계 추가, C-3 적용 범위를 결론이 옳은 답안으로 한정(규칙 11), 코드북 버전을 엑셀에서 읽음 | 있음 (R-v3) |
 | (이식 초판) | 2026-10 | 키트 `prompt_builder.py`(kit-1.2-20261022) 이식. 자료 출처만 엑셀 직접 로드로, 출력은 tool_use로 | 키트와 동일 |
@@ -23,6 +24,7 @@
 
 | 버전 | 날짜 | 변경 |
 | --- | --- | --- |
+| rv2-grader-1.5 | 2026-11-26 | `error_criterion`을 `matched_criterion`과 같은 방식으로 정수 정리(①, "3" → 정수). 검증 규칙은 추가하지 않음 |
 | rv2-grader-1.4 | 2026-11-25 | 검증 규칙 1개 추가: 미완 답안(response_complete=false)에 주 코드 R3가 붙으면 사유를 붙여 재시도하고, 그래도 남으면 검수로 보낸다(계획 문서 라벨·데이터 작업 2번). 1.3 결과 269회 중 해당 사례 0건이라 지금까지 결과에는 영향이 없다. `/grade` 응답에 `completion_status` 추가, 미완이면 `is_correct`는 null |
 | rv2-grader-1.3 | 2026-11-24 | 응답 정제를 `sanitize()` 하나로 통합(고칠 수 있는 형식은 고치고, 못 고치는 것은 사유를 남겨 1회 재시도·검수). tool_use 블록이 없으면 텍스트의 JSON을 읽음(`extract_result`). 결과 블록이 없어도 1회 재시도. 모델별 호출 기본값(Opus 5.5: 도구 auto, temperature 없음). 기본 모델 Opus 5.5. `outcome`(graded/review/incomplete/not_attempted/unreadable/error)과 `review_sources` 분류. 기록 추가: `extraction`, `first_issues`, `response_models`, `tool_choice`, `git_commit` |
 | (1.2 이전) | 2026-10 | 키트 `run_eval.validate()` 이식: 인용문 원문 대조, 허용 밖 코드 거부, 실패 사유를 붙여 1회 재시도, `missing_criteria` 번호 검사 |

@@ -38,7 +38,7 @@ import re
 
 CODEBOOK_VERSION = "R-v2"             # 엑셀에 버전이 없을 때만 쓰는 기본값 (실제 값은 mats["codebook_version"])
 BUILDER_VERSION = "kit-1.2-20261022"  # v1.2: 33건 개발셋 교정 패치 (J 6규칙, C-1~C-5)
-PORT_VERSION = "hongsu-rv2-1.3"       # hongsu 이식본 버전 (1.2: R-v3 규칙 11·12 대응, 1.3: 출력 형식 규칙 추가 — 판정 기준 변경 없음)
+PORT_VERSION = "hongsu-rv2-1.4"       # hongsu 이식본 버전 (1.2: R-v3 규칙 11·12 대응, 1.3: 출력 형식 규칙 추가 — 판정 기준 변경 없음, 1.4: 줄별 error_criterion 칸 추가 — 11/11 회의 합의 2)
 
 # v1.2 패치 — 33건 개발셋(전문가 라벨)으로 교정된 추가 판정 규칙.
 # 주의: 사후 적합된 규칙이므로 홀드아웃(신규 합성답안)에서 검증 전까지는 잠정.
@@ -139,7 +139,8 @@ def _rules_block(mats: dict, with_codes: bool) -> str:
 
 SCHEMA_GRADE_ONLY = """{
  "lines": [{"no": 1, "student_text": "...", "matched_criterion": 2 또는 null,
-            "judgment": "ok|wrong|depends", "quote": "wrong이면 원문 인용, 아니면 null",
+            "judgment": "ok|wrong|depends", "error_criterion": "wrong이면 이 줄의 오류가 어긴 기준 번호, 아니면 null",
+            "quote": "wrong이면 원문 인용, 아니면 null",
             "reason": "wrong이면 무엇이 왜 틀렸는지 한 문장", "depends_on": 원인 줄 번호 또는 null}],
  "math_result_correct": true,
  "input_status": "confirmed|not_attempted|unreadable",
@@ -148,7 +149,8 @@ SCHEMA_GRADE_ONLY = """{
 
 SCHEMA_WITH_CODEBOOK = """{
  "lines": [{"no": 1, "student_text": "...", "matched_criterion": 2 또는 null,
-            "judgment": "ok|wrong|depends", "code": "R코드 또는 null",
+            "judgment": "ok|wrong|depends", "error_criterion": "wrong이면 이 줄의 오류가 어긴 기준 번호, 아니면 null",
+            "code": "R코드 또는 null",
             "quote": "wrong이면 원문 인용, 아니면 null",
             "reason": "판정 근거 한 문장", "depends_on": 원인 줄 번호 또는 null}],
  "main_error_code": "첫 독립 wrong 줄(wrong 줄이 없으면 오류인 누락 기준)의 R코드, 없으면 null",
@@ -177,7 +179,7 @@ FORMAT_RULES = """<출력 형식 규칙>
 - true/false는 따옴표 없는 불리언으로 쓴다 ("true" 같은 문자열 금지).
 - 필드에 값이 없으면 null을 쓴다 ("null" 같은 문자열 금지). 학생 답안을 인용할 때는 학생이 쓴 글자 그대로 쓴다.
 - judgment는 ok, wrong, depends 중 하나를 소문자로 쓴다.
-- 번호 필드(no, matched_criterion, depends_on, missing_criteria의 원소)는 정수로 쓴다 (①, "3" 금지).
+- 번호 필드(no, matched_criterion, error_criterion, depends_on, missing_criteria의 원소)는 정수로 쓴다 (①, "3" 금지).
 - 도구를 호출할 수 없는 경우에만, 위 구조의 JSON 객체 하나를 ```json 블록으로 출력하고 그 밖에는 아무것도 쓰지 않는다.
 </출력 형식 규칙>"""
 
@@ -186,6 +188,9 @@ _LINE_PROPS = {
     "student_text": {"type": "string"},
     "matched_criterion": {"type": ["integer", "null"], "description": "대응되는 기준 번호, 없으면 null"},
     "judgment": {"type": "string", "enum": ["ok", "wrong", "depends"]},
+    # 1.4 — 11/11 회의 합의 2: '이 줄이 어느 기준에 해당하나'(matched_criterion)와
+    # '어디서 틀렸나'를 한 칸에 섞지 않도록 칸을 나눈다.
+    "error_criterion": {"type": ["integer", "null"], "description": "wrong이면 이 줄의 오류가 어긴 기준 번호, 아니면 null"},
     "quote": {"type": ["string", "null"], "description": "wrong이면 학생 답안 원문 인용, 아니면 null"},
     "reason": {"type": ["string", "null"]},
     "depends_on": {"type": ["integer", "null"], "description": "depends면 원인 줄 번호"},

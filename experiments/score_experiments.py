@@ -205,27 +205,47 @@ def exp_1_2(runs, labels):
         for (rep, _), f in zip(runs[aid], firsts):
             rep_hit[rep][0] += int(f == lab["first"])
             rep_hit[rep][1] += 1
-        table.append((aid, lab, firsts, [run_label(r) for r in recs]))
+        errs = [_first_error_criterion(r) for r in recs]
+        table.append((aid, lab, firsts, [run_label(r) for r in recs], errs))
 
     out = ["## 1-2 첫 오류 줄 일치 (기준표 번호)", "",
            "키트 정의: 라벨 첫 오류(기준표 번호)와 AI 첫 wrong 줄의 matched_criterion을 1회차 결과로 비교.", "",
            f"- **첫 오류 줄 일치: {_pct(first_n, first_d)}**",
            "- 회차별: " + ", ".join(f"{k}회차 {v[0]}/{v[1]}" for k, v in sorted(rep_hit.items(), key=lambda x: str(x[0]))), "",
-           "| answer_id | 라벨 코드 | 라벨 첫 줄 | AI 첫 줄 (회차별) | AI 코드 (회차별) | 일치 회차 |",
-           "| --- | --- | --- | --- | --- | --- |"]
-    for aid, lab, firsts, codes in sorted(table):
+           "AI 오류 기준(error_criterion)은 프롬프트 1.4부터 나오는 칸으로, 참고용으로 함께 적는다(일치 계산에는 쓰지 않음, 이전 결과는 '-').", "",
+           "| answer_id | 라벨 코드 | 라벨 첫 줄 | AI 첫 줄 (회차별) | AI 오류 기준 (회차별) | AI 코드 (회차별) | 일치 회차 |",
+           "| --- | --- | --- | --- | --- | --- | --- |"]
+    for aid, lab, firsts, codes, errs in sorted(table):
         hit = sum(1 for f in firsts if f == lab["first"])
         out.append(f"| {aid} | {lab['code'] or '없음'} | {lab['first']} | "
-                   f"{' / '.join('없음' if f is None else str(f) for f in firsts)} | {' / '.join(codes)} | {hit}/{len(firsts)} |")
+                   f"{' / '.join('없음' if f is None else str(f) for f in firsts)} | "
+                   f"{' / '.join('-' if e is _NO_FIELD else ('없음' if e is None else str(e)) for e in errs)} | "
+                   f"{' / '.join(codes)} | {hit}/{len(firsts)} |")
     out.append("")
 
     return out
 
 
+_NO_FIELD = object()
+
+
+def _first_error_criterion(rec):
+    """첫 wrong 줄의 error_criterion. 1.4 이전 결과처럼 칸이 없으면 _NO_FIELD."""
+    lines = [ln for ln in ((rec.get("result") or {}).get("lines") or []) if isinstance(ln, dict)]
+    wrong = [ln for ln in lines if ln.get("judgment") == "wrong"]
+    if not wrong:
+        return None
+    if "error_criterion" not in wrong[0]:
+        return _NO_FIELD
+    return K.to_int(wrong[0].get("error_criterion"))
+
+
 def _wrong_lines(rec):
     """1회차 wrong 줄들: '학생줄→기준:코드' 목록."""
     lines = [ln for ln in ((rec.get("result") or {}).get("lines") or []) if isinstance(ln, dict)]
-    return ", ".join(f"{ln.get('no')}→기준{ln.get('matched_criterion')}:{ln.get('code') or '코드없음'}"
+    return ", ".join(f"{ln.get('no')}→기준{ln.get('matched_criterion')}"
+                     + (f"(오류기준 {ln.get('error_criterion')})" if "error_criterion" in ln else "")
+                     + f":{ln.get('code') or '코드없음'}"
                      for ln in lines if ln.get("judgment") == "wrong") or "없음"
 
 

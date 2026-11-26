@@ -75,7 +75,7 @@ if RV2_TOOL_CHOICE not in ("tool", "auto"):
     RV2_TOOL_CHOICE = _defaults["tool_choice"]
 
 # 채점 동작(정제·검증·재시도 로직) 버전. 프롬프트가 같아도 이 값이 다르면 결과를 직접 비교하지 않는다.
-GRADER_VERSION = "rv2-grader-1.4"   # 1.4: 미완 답안의 R3를 검증에서 거른다 (CHANGELOG)
+GRADER_VERSION = "rv2-grader-1.5"   # 1.4: 미완 답안의 R3를 검증에서 거른다, 1.5: error_criterion 정수 정리 (CHANGELOG)
 
 USAGE_KEYS = ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
 
@@ -219,8 +219,9 @@ def _clean_line(ln: dict, pos: int, issues: list) -> dict:
     if "code" in ln:
         c = _to_null_or_str(ln.get("code"))
         out["code"] = c.strip().upper() if c else None
-    if "matched_criterion" in ln:
-        out["matched_criterion"] = _to_int(ln.get("matched_criterion"))
+    for k in ("matched_criterion", "error_criterion"):
+        if k in ln:
+            out[k] = _to_int(ln.get(k))
     if "depends_on" in ln:
         dep = _maybe_json(ln.get("depends_on"))
         if isinstance(dep, list):  # 원인 줄이 여러 개면 리스트 그대로 둔다 (정보를 버리지 않음)
