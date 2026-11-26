@@ -10,6 +10,7 @@
 
 | 버전 | 날짜 | 변경 | 판정 기준 변경 |
 | --- | --- | --- | --- |
+| hongsu-rv2-1.6 | 2026-11-26 | 1.3 + 줄마다 `violated_criterion`(wrong이면 그 줄의 오류가 어긴 기준 번호, 아니면 null). 1.4·1.5의 `error_criterion`과 같은 칸인데, 이름을 코드북 R v3.1 기록 표(`line_results[].violated_criterion`)에 맞춤. 코드북의 `error_criterion`(이 줄이 어느 기준에 해당하는가)은 여기의 `matched_criterion`. `stopped_midway` 칸은 넣지 않음(1.5에만 있음) | 없음 (출력 칸 추가) |
 | hongsu-rv2-1.5 | 2026-11-26 | 답안 전체에 `stopped_midway`(학생이 끝까지 쓰지 않고 중간에 멈춰 최종 답을 내지 않았으면 true, 끝까지 쓰고 답을 냈으면 요구 항목이 빠졌거나 틀렸어도 false) 칸 추가. 11/11 회의 합의 3(정오답은 끝까지 썼는지로 나누고 중간에 멈춘 답안은 미완). `response_complete`(요구 항목 누락)는 그대로 | 없음 (출력 칸 추가) |
 | hongsu-rv2-1.4 | 2026-11-26 | 줄마다 `error_criterion`(wrong이면 그 줄의 오류가 어긴 기준 번호, 아니면 null) 칸 추가. `matched_criterion`(그 줄이 해당하는 기준)은 그대로. 11/11 회의 합의 2(줄을 기준에 맞추는 일과 틀린 곳 진단을 한 칸에 섞지 않음). 출력 형식 규칙의 정수 필드 목록에도 추가. 판정 절차·규칙 문구는 그대로 | 없음 (출력 칸 추가) |
 | hongsu-rv2-1.3 | 2026-11-24 | 스키마 뒤에 출력 형식 규칙(`FORMAT_RULES`) 추가: 줄은 객체로, 불리언·null은 문자열 금지, judgment 소문자, 번호 필드는 정수, 도구를 못 쓰면 ```json 블록 하나 | 없음 |
@@ -25,6 +26,7 @@
 
 | 버전 | 날짜 | 변경 |
 | --- | --- | --- |
+| rv2-grader-1.7 | 2026-11-26 | `violated_criterion`을 정수로 정리(1.4·1.5 결과의 `error_criterion`도 계속 정리). 검증 규칙은 그대로 |
 | rv2-grader-1.6 | 2026-11-26 | `stopped_midway`를 불리언으로 정리(빠지면 null, 추정하지 않음). 검증 규칙은 그대로(미완 R3 재시도 규칙은 계속 `response_complete` 기준). 키트 방식 결과 분류(`outcome`의 incomplete, 실험의 미완 회차)도 그대로 `response_complete` 기준 |
 | rv2-grader-1.5 | 2026-11-26 | `error_criterion`을 `matched_criterion`과 같은 방식으로 정수 정리(①, "3" → 정수). 검증 규칙은 추가하지 않음 |
 | rv2-grader-1.4 | 2026-11-25 | 검증 규칙 1개 추가: 미완 답안(response_complete=false)에 주 코드 R3가 붙으면 사유를 붙여 재시도하고, 그래도 남으면 검수로 보낸다(계획 문서 라벨·데이터 작업 2번). 1.3 결과 269회 중 해당 사례 0건이라 지금까지 결과에는 영향이 없다. `/grade` 응답에 `completion_status` 추가, 미완이면 `is_correct`는 null |

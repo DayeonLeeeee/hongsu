@@ -82,8 +82,11 @@ VERSION_NOTES = {
                       "'여러 줄을 한 원소에 합치지 않는다')은 일부러 넣지 않음",
     "hongsu-rv2-1.4": "줄마다 error_criterion(오류가 어긴 기준 번호) 칸 추가 — 11/11 합의 2. matched_criterion은 그대로",
     "hongsu-rv2-1.5": "1.4 + 답안 전체에 stopped_midway(중간에 멈춤) 칸 추가 — 11/11 합의 3. 판정 절차·규칙·코드북·기준표는 1.3과 같음",
+    "hongsu-rv2-1.6": "1.3 + 줄마다 violated_criterion(오류가 어긴 기준 번호) 칸 — 11/11 합의 2, 이름은 코드북 R v3.1 기록 표대로. "
+                      "1.4·1.5의 error_criterion과 같은 뜻(이름만 바꿈). stopped_midway 칸은 없음. 판정 절차·규칙·코드북·기준표는 1.3과 같음",
     "rv2-grader-1.5": "error_criterion 정수 정리",
     "rv2-grader-1.6": "1.5 + stopped_midway 불리언 정리. 검증 규칙·결과 분류(미완 회차 등)는 1.4와 같음(response_complete 기준)",
+    "rv2-grader-1.7": "1.6 + violated_criterion 정수 정리. 검증 규칙·결과 분류는 1.4와 같음",
 }
 
 FIRST_LINE_COL = "전문가_첫오류_학생줄"   # prepare_answers와 같은 이름
@@ -233,8 +236,8 @@ def exp_1_2(runs, labels):
            "키트 정의: 라벨 첫 오류(기준표 번호)와 AI 첫 wrong 줄의 matched_criterion을 1회차 결과로 비교.", "",
            f"- **첫 오류 줄 일치: {_pct(first_n, first_d)}**",
            "- 회차별: " + ", ".join(f"{k}회차 {v[0]}/{v[1]}" for k, v in sorted(rep_hit.items(), key=lambda x: str(x[0]))), "",
-           "AI 오류 기준(error_criterion)은 프롬프트 1.4부터 나오는 칸으로, 참고용으로 함께 적는다(일치 계산에는 쓰지 않음, 이전 결과는 '-').", "",
-           "| answer_id | 라벨 코드 | 라벨 첫 줄 | AI 첫 줄 (회차별) | AI 오류 기준 (회차별) | AI 코드 (회차별) | 일치 회차 |",
+           "AI 어긴 기준(violated_criterion, 1.4·1.5 결과에서는 error_criterion이라는 이름)은 참고용으로 함께 적는다(일치 계산에는 쓰지 않음, 이 칸이 없는 결과는 '-').", "",
+           "| answer_id | 라벨 코드 | 라벨 첫 줄 | AI 첫 줄 (회차별) | AI 어긴 기준 (회차별) | AI 코드 (회차별) | 일치 회차 |",
            "| --- | --- | --- | --- | --- | --- | --- |"]
     for aid, lab, firsts, codes, errs in sorted(table):
         hit = sum(1 for f in firsts if f == lab["first"])
@@ -268,7 +271,7 @@ def _exp_1_2b(runs, labels):
             continue
         fw = [_first_wrong(r) for r in recs]
         nos = [K.to_int(w.get("no")) if w else None for w in fw]
-        ecs = [(K.to_int(w.get("error_criterion")) if "error_criterion" in w else _NO_FIELD) if w else None for w in fw]
+        ecs = [_violated(w) if w else None for w in fw]
         if lab.get("first_line") is not None:
             ln_d += 1
             ln_n += int(nos[0] == lab["first_line"])
@@ -280,10 +283,10 @@ def _exp_1_2b(runs, labels):
                      f"{lab.get('err_crit') if lab.get('err_crit') is not None else ''} | {fmt(ecs)} |")
     return ["## 1-2b 첫 오류 두 열 (학생줄 · 오류기준)", "",
             "라벨 '전문가_첫오류_학생줄'·'전문가_오류기준'(사람이 채운 열)과 AI 1회차 첫 wrong 줄의 no·error_criterion을 비교."
-            " error_criterion이 없는 결과(프롬프트 1.4 이전)는 오류기준 비교에서 뺀다('-').", "",
+            " 어긴 기준 칸이 없는 결과(프롬프트 1.4 이전)는 오류기준 비교에서 뺀다('-').", "",
             f"- **학생줄 일치: {_pct(ln_n, ln_d)}**",
             f"- **오류기준 일치: {_pct(ec_n, ec_d)}**", "",
-            "| answer_id | 라벨 학생줄 | AI 첫 wrong 줄 no (회차별) | 라벨 오류기준 | AI error_criterion (회차별) |",
+            "| answer_id | 라벨 학생줄 | AI 첫 wrong 줄 no (회차별) | 라벨 오류기준 | AI 어긴 기준 (회차별) |",
             "| --- | --- | --- | --- | --- |"] + table + [""]
 
 
@@ -291,21 +294,27 @@ _NO_FIELD = object()
 
 
 def _first_error_criterion(rec):
-    """첫 wrong 줄의 error_criterion. 1.4 이전 결과처럼 칸이 없으면 _NO_FIELD."""
+    """첫 wrong 줄의 어긴 기준(violated_criterion, 1.4·1.5는 error_criterion). 칸이 없으면 _NO_FIELD."""
     lines = [ln for ln in ((rec.get("result") or {}).get("lines") or []) if isinstance(ln, dict)]
     wrong = [ln for ln in lines if ln.get("judgment") == "wrong"]
     if not wrong:
         return None
-    if "error_criterion" not in wrong[0]:
-        return _NO_FIELD
-    return K.to_int(wrong[0].get("error_criterion"))
+    return _violated(wrong[0])
+
+
+def _violated(ln):
+    """줄의 어긴 기준 번호. 1.6부터 violated_criterion, 1.4·1.5 결과는 같은 뜻의 error_criterion. 없으면 _NO_FIELD."""
+    for k in ("violated_criterion", "error_criterion"):
+        if k in ln:
+            return K.to_int(ln.get(k))
+    return _NO_FIELD
 
 
 def _wrong_lines(rec):
     """1회차 wrong 줄들: '학생줄→기준:코드' 목록."""
     lines = [ln for ln in ((rec.get("result") or {}).get("lines") or []) if isinstance(ln, dict)]
     return ", ".join(f"{ln.get('no')}→기준{ln.get('matched_criterion')}"
-                     + (f"(오류기준 {ln.get('error_criterion')})" if "error_criterion" in ln else "")
+                     + (f"(어긴 기준 {_violated(ln)})" if _violated(ln) is not _NO_FIELD else "")
                      + f":{ln.get('code') or '코드없음'}"
                      for ln in lines if ln.get("judgment") == "wrong") or "없음"
 

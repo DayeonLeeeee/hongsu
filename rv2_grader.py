@@ -75,7 +75,7 @@ if RV2_TOOL_CHOICE not in ("tool", "auto"):
     RV2_TOOL_CHOICE = _defaults["tool_choice"]
 
 # 채점 동작(정제·검증·재시도 로직) 버전. 프롬프트가 같아도 이 값이 다르면 결과를 직접 비교하지 않는다.
-GRADER_VERSION = "rv2-grader-1.6"   # 1.4: 미완 답안의 R3를 검증에서 거른다, 1.5: error_criterion 정수 정리, 1.6: stopped_midway 불리언 정리 (CHANGELOG)
+GRADER_VERSION = "rv2-grader-1.7"   # 1.4: 미완 답안의 R3를 검증에서 거른다, 1.5: error_criterion 정수 정리, 1.6: stopped_midway 불리언 정리, 1.7: violated_criterion 정수 정리 (CHANGELOG)
 
 USAGE_KEYS = ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
 
@@ -224,7 +224,7 @@ def _clean_line(ln: dict, pos: int, issues: list) -> dict:
     if "code" in ln:
         c = _to_null_or_str(ln.get("code"))
         out["code"] = c.strip().upper() if c else None
-    for k in ("matched_criterion", "error_criterion"):
+    for k in ("matched_criterion", "violated_criterion", "error_criterion"):   # error_criterion은 1.4·1.5 결과 호환
         if k in ln:
             out[k] = _to_int(ln.get(k))
     if "depends_on" in ln:

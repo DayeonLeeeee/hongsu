@@ -376,6 +376,9 @@ def test_first_error_two_columns_merge_and_score(tmp_path):
     assert "학생줄 일치: 1/1" in out and "오류기준 일치: 1/1" in out
     old = "\n".join(S._exp_1_2b({"A1": [(1, rec(None))]}, labels))   # 1.4 이전 결과: 오류기준 비교에서 뺌
     assert "오류기준 일치: 0/0" in old and "| - |" in old
+    rec16 = {"answer_id": "A1", "repeat": 1, "result": {"main_error_code": "R8", "lines": [
+        {"no": 2, "judgment": "wrong", "matched_criterion": 3, "code": "R8", "violated_criterion": 4}]}}
+    assert "오류기준 일치: 1/1" in "\n".join(S._exp_1_2b({"A1": [(1, rec16)]}, labels))   # 1.6 이름
 
 
 def test_run_batch_retry_errors_keeps_rows_and_repeat(tmp_path, monkeypatch):

@@ -38,7 +38,7 @@ import re
 
 CODEBOOK_VERSION = "R-v2"             # 엑셀에 버전이 없을 때만 쓰는 기본값 (실제 값은 mats["codebook_version"])
 BUILDER_VERSION = "kit-1.2-20261022"  # v1.2: 33건 개발셋 교정 패치 (J 6규칙, C-1~C-5)
-PORT_VERSION = "hongsu-rv2-1.5"       # hongsu 이식본 버전 (1.2: R-v3 규칙 11·12 대응, 1.3: 출력 형식 규칙 추가 — 판정 기준 변경 없음, 1.4: 줄별 error_criterion 칸(11/11 합의 2), 1.5: stopped_midway 칸(합의 3) 추가)
+PORT_VERSION = "hongsu-rv2-1.6"       # hongsu 이식본 버전 (1.2: R-v3 규칙 11·12 대응, 1.3: 출력 형식 규칙 추가 — 판정 기준 변경 없음, 1.4: 줄별 어긴 기준 칸(11/11 합의 2), 1.5: stopped_midway 칸(합의 3), 1.6: 1.3 + 어긴 기준 칸을 코드북 v3.1 이름 violated_criterion으로 — stopped_midway 뺌)
 
 # v1.2 패치 — 33건 개발셋(전문가 라벨)으로 교정된 추가 판정 규칙.
 # 주의: 사후 적합된 규칙이므로 홀드아웃(신규 합성답안)에서 검증 전까지는 잠정.
@@ -139,7 +139,7 @@ def _rules_block(mats: dict, with_codes: bool) -> str:
 
 SCHEMA_GRADE_ONLY = """{
  "lines": [{"no": 1, "student_text": "...", "matched_criterion": 2 또는 null,
-            "judgment": "ok|wrong|depends", "error_criterion": "wrong이면 이 줄의 오류가 어긴 기준 번호, 아니면 null",
+            "judgment": "ok|wrong|depends", "violated_criterion": "wrong이면 이 줄의 오류가 어긴 기준 번호, 아니면 null",
             "quote": "wrong이면 원문 인용, 아니면 null",
             "reason": "wrong이면 무엇이 왜 틀렸는지 한 문장", "depends_on": 원인 줄 번호 또는 null}],
  "math_result_correct": true,
@@ -149,7 +149,7 @@ SCHEMA_GRADE_ONLY = """{
 
 SCHEMA_WITH_CODEBOOK = """{
  "lines": [{"no": 1, "student_text": "...", "matched_criterion": 2 또는 null,
-            "judgment": "ok|wrong|depends", "error_criterion": "wrong이면 이 줄의 오류가 어긴 기준 번호, 아니면 null",
+            "judgment": "ok|wrong|depends", "violated_criterion": "wrong이면 이 줄의 오류가 어긴 기준 번호, 아니면 null",
             "code": "R코드 또는 null",
             "quote": "wrong이면 원문 인용, 아니면 null",
             "reason": "판정 근거 한 문장", "depends_on": 원인 줄 번호 또는 null}],
@@ -160,7 +160,6 @@ SCHEMA_WITH_CODEBOOK = """{
  "review_needed": false,
  "review_reason": "",
  "response_complete": true 또는 false (문항의 요구 항목을 모두 썼으면 true),
- "stopped_midway": true 또는 false (학생이 풀이를 끝까지 쓰지 않고 중간에 멈춰 최종 답을 내지 않았으면 true. 끝까지 쓰고 답을 냈으면 요구 항목이 빠졌거나 틀렸어도 false),
  "missing_criteria": [대응하는 학생 풀이가 없는 기준 번호들, 없으면 []]
 }"""
 
@@ -180,7 +179,7 @@ FORMAT_RULES = """<출력 형식 규칙>
 - true/false는 따옴표 없는 불리언으로 쓴다 ("true" 같은 문자열 금지).
 - 필드에 값이 없으면 null을 쓴다 ("null" 같은 문자열 금지). 학생 답안을 인용할 때는 학생이 쓴 글자 그대로 쓴다.
 - judgment는 ok, wrong, depends 중 하나를 소문자로 쓴다.
-- 번호 필드(no, matched_criterion, error_criterion, depends_on, missing_criteria의 원소)는 정수로 쓴다 (①, "3" 금지).
+- 번호 필드(no, matched_criterion, violated_criterion, depends_on, missing_criteria의 원소)는 정수로 쓴다 (①, "3" 금지).
 - 도구를 호출할 수 없는 경우에만, 위 구조의 JSON 객체 하나를 ```json 블록으로 출력하고 그 밖에는 아무것도 쓰지 않는다.
 </출력 형식 규칙>"""
 
@@ -191,7 +190,9 @@ _LINE_PROPS = {
     "judgment": {"type": "string", "enum": ["ok", "wrong", "depends"]},
     # 1.4 — 11/11 회의 합의 2: '이 줄이 어느 기준에 해당하나'(matched_criterion)와
     # '어디서 틀렸나'를 한 칸에 섞지 않도록 칸을 나눈다.
-    "error_criterion": {"type": ["integer", "null"], "description": "wrong이면 이 줄의 오류가 어긴 기준 번호, 아니면 null"},
+    # 1.6 — 이름을 코드북 R v3.1 기록 표에 맞춤: line_results[].violated_criterion = 어긴 기준.
+    #       (코드북의 error_criterion = '이 줄이 어느 기준에 해당하는가' = 여기의 matched_criterion)
+    "violated_criterion": {"type": ["integer", "null"], "description": "wrong이면 이 줄의 오류가 어긴 기준 번호, 아니면 null"},
     "quote": {"type": ["string", "null"], "description": "wrong이면 학생 답안 원문 인용, 아니면 null"},
     "reason": {"type": ["string", "null"]},
     "depends_on": {"type": ["integer", "null"], "description": "depends면 원인 줄 번호"},
@@ -215,16 +216,11 @@ def tool_schema(mode: str) -> dict:
             "review_reason": {"type": "string"},
             "response_complete": {"type": "boolean",
                                   "description": "문항의 요구 항목을 모두 썼으면 true, 중단·누락이 있으면 false"},
-            # 1.5 — 11/11 회의 합의 3: 정오답은 끝까지 썼는지로 나누고, 중간에 멈춘 답안은 미완.
-            # response_complete(요구 항목 누락)와 따로 둔다.
-            "stopped_midway": {"type": "boolean",
-                               "description": "학생이 풀이를 끝까지 쓰지 않고 중간에 멈춰 최종 답을 내지 않았으면 true. "
-                                              "끝까지 쓰고 답을 냈으면 요구 항목이 빠졌거나 틀렸어도 false"},
             "missing_criteria": {"type": "array", "items": {"type": "integer"},
                                  "description": "대응하는 학생 풀이가 없는 기준 번호 (코드 아님, 피드백용). 없으면 []"},
         })
         required += ["main_error_code", "justification_level", "review_needed",
-                     "response_complete", "stopped_midway", "missing_criteria"]
+                     "response_complete", "missing_criteria"]
     else:
         props["notes"] = {"type": "string"}
     props["lines"] = {"type": "array", "items": {"type": "object", "properties": line_props,

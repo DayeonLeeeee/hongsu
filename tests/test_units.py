@@ -141,6 +141,7 @@ PROMPT_FINGERPRINT = {
     "R-v3-with_codebook-kit-1.2-20261022-hongsu-rv2-1.3-xdfcadb76": "a843fc32e2382099",
     "R-v3-with_codebook-kit-1.2-20261022-hongsu-rv2-1.4-xdfcadb76": "7a1d2b54929654b9",  # 1.4: error_criterion 칸
     "R-v3-with_codebook-kit-1.2-20261022-hongsu-rv2-1.5-xdfcadb76": "877183f70c90d0ec",  # 1.5: stopped_midway 칸
+    "R-v3-with_codebook-kit-1.2-20261022-hongsu-rv2-1.6-xdfcadb76": "edf92c57f143a7fb",  # 1.6: 1.3 + violated_criterion (stopped_midway 없음)
 }
 
 
@@ -271,3 +272,7 @@ def test_sanitize_error_criterion_to_int():
         "math_result_correct": False, "input_status": "confirmed"}, mode="grade_only")
     assert res["lines"][0]["matched_criterion"] == 4 and res["lines"][0]["error_criterion"] == 1
     assert "error_criterion" not in res["lines"][1]
+    res2, _ = rv2_grader.sanitize({"lines": [
+        {"no": 1, "student_text": "a", "judgment": "wrong", "matched_criterion": 4, "violated_criterion": "1"}],
+        "math_result_correct": False, "input_status": "confirmed"}, mode="grade_only")
+    assert res2["lines"][0]["violated_criterion"] == 1   # 1.7: 코드북 v3.1 이름
