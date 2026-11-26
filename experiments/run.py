@@ -17,6 +17,7 @@ import argparse
 import csv
 import datetime
 import glob
+import json
 import os
 import platform
 import re
@@ -361,11 +362,22 @@ def cmd_1_2(a):
     s = stamp()
     report(["--results", kit_result(kit, KIT_EXPERT_1111), "--answers", exp, "--first-col", "전문가_첫오류_통일",
             "--code-col", "전문가_코드_통일", "--only", "1-2,1-5,focus"], f"1-2_unified_1111_{s}")
-    newest = latest_result("expert_33")   # 1-1b를 돌렸으면 1.3 결과로도
+    newest = latest_result("expert_33")   # 1-1b를 돌렸으면 그 결과로도 (파일 이름에 그 결과의 프롬프트 버전)
     if newest:
         report(["--results", newest, "--answers", exp, "--first-col", "전문가_첫오류_통일",
                 "--code-col", "전문가_코드_통일", "--only", "1-2,1-5,focus"],
-               f"1-2_unified_1.3_{s}")
+               f"1-2_unified_{result_ver(newest)}_{s}")
+
+
+def result_ver(path):
+    """결과 파일 첫 행의 prompt_version 끝 번호 (예: ...-hongsu-rv2-1.5-x... → 1.5). 못 읽으면 'unknown'."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            pv = json.loads(f.readline()).get("prompt_version") or ""
+        m = re.search(r"hongsu-rv2-([\d.]+)", pv)
+        return m.group(1) if m else "unknown"
+    except (OSError, ValueError):
+        return "unknown"
 
 
 def prompt_ver():
@@ -388,7 +400,7 @@ def cmd_1_1b(a):
         new_exp = run_batch(exp)
         new_hold = run_batch(hold)
     s = stamp()
-    v = prompt_ver()   # 파일 이름·표에 지금 프롬프트 버전을 적는다 (11/25 1.3 결과와 섞이지 않게)
+    v = result_ver(new_exp)   # 파일 이름·표에 그 결과의 프롬프트 버전을 적는다 (--reuse로 옛 결과를 읽어도 맞게)
     report(["--results", new_exp, "--answers", exp], f"1-1b_expert33_{v}_{s}")
     report(["--results", new_hold, "--answers", hold], f"1-1b_holdout45_{v}_{s}")
     for stem, base, new, ans in (("expert33", KIT_EXPERT_1111, new_exp, exp), ("holdout45", KIT_HOLDOUT_1111, new_hold, hold)):
