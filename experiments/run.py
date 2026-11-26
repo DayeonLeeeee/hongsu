@@ -446,7 +446,7 @@ def cmd_v31(a):
     if not os.path.exists(V31_XLSX):
         import build_dataset_v31
         build_dataset_v31.build()
-        say(f"materials/dataset_rv31.xlsx 만듦 (바뀐 칸: 엑셀 CHANGES_v3.1 시트)")
+        say("materials/dataset_rv31.xlsx 만듦 (바뀐 칸: 엑셀 CHANGES_v3.1 시트)")
     os.environ["RV2_XLSX"] = V31_XLSX      # run_batch.py가 이 자료로 프롬프트를 만든다
     sets = []
     for name, (code_col, first_col) in V31_COLS.items():
